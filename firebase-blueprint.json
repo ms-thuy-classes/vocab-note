@@ -1,0 +1,270 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Student account profile, XP/streak gamification progress, audio preferences, and daily reminder settings.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the student."
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Student display name."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Authenticated student email address."
+        },
+        "xp": {
+          "type": "number",
+          "description": "Total accumulated XP."
+        },
+        "dailyXp": {
+          "type": "number",
+          "description": "XP earned today."
+        },
+        "todayDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Current local date YYYY-MM-DD."
+        },
+        "streak": {
+          "type": "number",
+          "description": "Consecutive study days streak."
+        },
+        "lastActiveDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Last active date YYYY-MM-DD."
+        },
+        "totalWordsAdded": {
+          "type": "number",
+          "description": "Total words added by student."
+        },
+        "totalFlashcardsCompleted": {
+          "type": "number",
+          "description": "Total flashcard decks completed."
+        },
+        "totalQuizzesCompleted": {
+          "type": "number",
+          "description": "Total Smart Quizzes completed."
+        },
+        "totalCorrectAnswers": {
+          "type": "number",
+          "description": "Total correct quiz answers."
+        },
+        "accent": {
+          "type": "string",
+          "enum": ["en-US", "en-GB"],
+          "description": "Preferred English pronunciation accent."
+        },
+        "soundMuted": {
+          "type": "boolean",
+          "description": "Whether quiz feedback sound effects are muted."
+        },
+        "reminderEnabled": {
+          "type": "boolean",
+          "description": "Whether daily study reminders are enabled."
+        },
+        "reminderEmail": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Email address for study reminders."
+        },
+        "reminderTime": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 5,
+          "pattern": "^\\d{2}:\\d{2}$",
+          "description": "Preferred daily study time HH:MM."
+        },
+        "reminderFolderIds": {
+          "type": "array",
+          "description": "Selected topic folder IDs to review (max 30)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "ownerId",
+        "studentName",
+        "email",
+        "xp",
+        "dailyXp",
+        "todayDate",
+        "streak",
+        "lastActiveDate",
+        "totalWordsAdded",
+        "totalFlashcardsCompleted",
+        "totalQuizzesCompleted",
+        "totalCorrectAnswers",
+        "accent",
+        "soundMuted",
+        "reminderEnabled",
+        "reminderEmail",
+        "reminderTime",
+        "reminderFolderIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TopicFolder": {
+      "title": "TopicFolder",
+      "description": "A personal vocabulary topic folder owned by a student.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the folder owner."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Topic folder name."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Optional short folder description."
+        },
+        "color": {
+          "type": "string",
+          "enum": ["lavender", "blush", "mint", "cream", "sky", "peach"],
+          "description": "Pastel color theme for the folder."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["ownerId", "name", "description", "color", "createdAt", "updatedAt"]
+    },
+    "VocabWord": {
+      "title": "VocabWord",
+      "description": "An interactive 7-column vocabulary entry inside a student topic folder.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the word owner."
+        },
+        "folderId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent TopicFolder document ID."
+        },
+        "english": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "English word or phrase."
+        },
+        "ipa": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Phonetic IPA transcription."
+        },
+        "vietnamese": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Vietnamese meaning."
+        },
+        "example": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "English example sentence."
+        },
+        "exampleVi": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Vietnamese translation of the example sentence."
+        },
+        "synonyms": {
+          "type": "array",
+          "description": "Optional English synonyms (max 15)."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 300000,
+          "description": "Optional image URL or compressed DataURL."
+        },
+        "mastered": {
+          "type": "boolean",
+          "description": "Whether the student marked this word as mastered."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "ownerId",
+        "folderId",
+        "english",
+        "ipa",
+        "vietnamese",
+        "example",
+        "exampleVi",
+        "synonyms",
+        "imageUrl",
+        "mastered",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private student profile, XP/streak stats, and reminder configuration."
+    },
+    "/users/{userId}/folders/{folderId}": {
+      "schema": { "$ref": "#/entities/TopicFolder" },
+      "description": "Topic folders owned by the student."
+    },
+    "/users/{userId}/words/{wordId}": {
+      "schema": { "$ref": "#/entities/VocabWord" },
+      "description": "Vocabulary words owned by the student inside a topic folder."
+    }
+  }
+}

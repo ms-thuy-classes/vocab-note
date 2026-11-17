@@ -1,0 +1,223 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isVerifiedOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isValidTimeStr(t) {
+      return t is string && t.size() == 5 && t.matches('^\\d{2}:\\d{2}$');
+    }
+
+    // --- Entity Validation Blueprints ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+        'ownerId', 'studentName', 'email', 'xp', 'dailyXp', 'todayDate',
+        'streak', 'lastActiveDate', 'totalWordsAdded', 'totalFlashcardsCompleted',
+        'totalQuizzesCompleted', 'totalCorrectAnswers', 'accent', 'soundMuted',
+        'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds',
+        'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'ownerId', 'studentName', 'email', 'xp', 'dailyXp', 'todayDate',
+        'streak', 'lastActiveDate', 'totalWordsAdded', 'totalFlashcardsCompleted',
+        'totalQuizzesCompleted', 'totalCorrectAnswers', 'accent', 'soundMuted',
+        'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds',
+        'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.ownerId)
+      && data.ownerId == request.auth.uid
+      && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80
+      && data.email is string && data.email.size() <= 200
+      && data.xp is number && data.xp >= 0
+      && data.dailyXp is number && data.dailyXp >= 0
+      && isValidDateStr(data.todayDate)
+      && data.streak is number && data.streak >= 0
+      && isValidDateStr(data.lastActiveDate)
+      && data.totalWordsAdded is number && data.totalWordsAdded >= 0
+      && data.totalFlashcardsCompleted is number && data.totalFlashcardsCompleted >= 0
+      && data.totalQuizzesCompleted is number && data.totalQuizzesCompleted >= 0
+      && data.totalCorrectAnswers is number && data.totalCorrectAnswers >= 0
+      && data.accent in ['en-US', 'en-GB']
+      && data.soundMuted is bool
+      && data.reminderEnabled is bool
+      && data.reminderEmail is string && data.reminderEmail.size() <= 200
+      && isValidTimeStr(data.reminderTime)
+      && data.reminderFolderIds is list
+      && data.reminderFolderIds.size() <= 30
+      && (data.reminderFolderIds.size() == 0 || isValidId(data.reminderFolderIds[0]))
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidFolder(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'description', 'color', 'createdAt', 'updatedAt'])
+      && data.keys().hasOnly(['ownerId', 'name', 'description', 'color', 'createdAt', 'updatedAt'])
+      && isValidId(data.ownerId)
+      && data.ownerId == request.auth.uid
+      && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+      && data.description is string && data.description.size() <= 300
+      && data.color in ['lavender', 'blush', 'mint', 'cream', 'sky', 'peach']
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidWord(data) {
+      return data.keys().hasAll([
+        'ownerId', 'folderId', 'english', 'ipa', 'vietnamese', 'example',
+        'exampleVi', 'synonyms', 'imageUrl', 'mastered', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'ownerId', 'folderId', 'english', 'ipa', 'vietnamese', 'example',
+        'exampleVi', 'synonyms', 'imageUrl', 'mastered', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.ownerId)
+      && data.ownerId == request.auth.uid
+      && isValidId(data.folderId)
+      && data.english is string && data.english.size() <= 150
+      && data.ipa is string && data.ipa.size() <= 150
+      && data.vietnamese is string && data.vietnamese.size() <= 300
+      && data.example is string && data.example.size() <= 500
+      && data.exampleVi is string && data.exampleVi.size() <= 500
+      && data.synonyms is list
+      && data.synonyms.size() <= 15
+      && (data.synonyms.size() == 0 || (data.synonyms[0] is string && data.synonyms[0].size() <= 80))
+      && data.imageUrl is string && data.imageUrl.size() <= 300000
+      && data.mastered is bool
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'studentName', 'xp', 'dailyXp', 'todayDate', 'streak', 'lastActiveDate',
+            'totalWordsAdded', 'totalFlashcardsCompleted', 'totalQuizzesCompleted',
+            'totalCorrectAnswers', 'updatedAt'
+          ]) ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'accent', 'soundMuted', 'updatedAt'
+          ]) ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds', 'updatedAt'
+          ]) ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'studentName', 'xp', 'dailyXp', 'todayDate', 'streak', 'lastActiveDate',
+            'totalWordsAdded', 'totalFlashcardsCompleted', 'totalQuizzesCompleted',
+            'totalCorrectAnswers', 'accent', 'soundMuted', 'reminderEnabled',
+            'reminderEmail', 'reminderTime', 'reminderFolderIds', 'updatedAt'
+          ])
+        );
+
+      allow delete: if false;
+
+      match /folders/{folderId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(folderId) && existing().ownerId == request.auth.uid;
+        allow list: if isOwner(userId) && isValidId(userId) && resource.data.ownerId == request.auth.uid;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(folderId)
+          && isValidFolder(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(folderId)
+          && isValidFolder(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'color', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(folderId);
+      }
+
+      match /words/{wordId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(wordId) && existing().ownerId == request.auth.uid;
+        allow list: if isOwner(userId) && isValidId(userId) && resource.data.ownerId == request.auth.uid;
+
+        allow create: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(wordId)
+          && isValidWord(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId));
+
+        allow update: if isVerifiedOwner(userId)
+          && isValidId(userId)
+          && isValidId(wordId)
+          && isValidWord(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'english', 'ipa', 'vietnamese', 'example', 'exampleVi',
+              'synonyms', 'imageUrl', 'mastered', 'folderId', 'updatedAt'
+            ])
+          )
+          && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId));
+
+        allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(wordId);
+      }
+    }
+  }
+}

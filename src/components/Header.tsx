@@ -1,9 +1,12 @@
 import React from 'react';
+import type { User } from 'firebase/auth';
 import {
   BellRing,
   BookOpen,
+  Cloud,
   Download,
   Flame,
+  LogIn,
   Trophy,
   Volume2,
   VolumeX,
@@ -19,6 +22,9 @@ interface HeaderProps {
   onOpenLeaderboard: () => void;
   onOpenReminders: () => void;
   onOpenBackup: () => void;
+  onOpenAuth: () => void;
+  user: User | null;
+  isSyncing: boolean;
   progress: UserProgress;
   accent: 'en-US' | 'en-GB';
   onToggleAccent: () => void;
@@ -33,6 +39,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLeaderboard,
   onOpenReminders,
   onOpenBackup,
+  onOpenAuth,
+  user,
+  isSyncing,
   progress,
   accent,
   onToggleAccent,
@@ -55,12 +64,12 @@ export const Header: React.FC<HeaderProps> = ({
             <BookOpen className="w-4.5 h-4.5 text-[#4D3B73]" />
           </span>
           <span className="text-base sm:text-lg font-bold tracking-tight text-[#2B2438]">
-            Learn with Ms. Thúy <span className="hidden sm:inline font-semibold text-[#6F5C96]">- Vocabulary Note</span>
+            Learn with Ms. Thúy <span className="hidden xl:inline font-semibold text-[#6F5C96]">- Vocabulary Note</span>
           </span>
         </button>
 
         {/* Zone 2: Clean Text Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-[#5E556E]">
+        <nav className="hidden md:flex items-center gap-5 lg:gap-6 text-sm font-semibold text-[#5E556E]">
           <button
             type="button"
             onClick={onNavigateNotebook}
@@ -98,8 +107,8 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </nav>
 
-        {/* Zone 3: Compact Rank, Streak & Audio Controls */}
-        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+        {/* Zone 3: Rank, Audio & Cloud Sign-In */}
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           {/* Audio controls */}
           <button
             type="button"
@@ -114,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onToggleMute}
             aria-label={soundMuted ? 'Unmute quiz sound effects' : 'Mute quiz sound effects'}
             title={soundMuted ? 'Unmute sound effects' : 'Mute sound effects'}
-            className="p-2 rounded-xl bg-white/75 border border-[#867C96]/15 text-[#5E556E] hover:text-[#2B2438] hover:bg-white transition-colors shrink-0 cursor-pointer"
+            className="hidden sm:inline-flex p-2 rounded-xl bg-white/75 border border-[#867C96]/15 text-[#5E556E] hover:text-[#2B2438] hover:bg-white transition-colors shrink-0 cursor-pointer"
           >
             {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
@@ -124,14 +133,14 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={onOpenLeaderboard}
             title="View Rank Progression & Daily Leaderboard"
-            className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-white/85 border border-[#867C96]/18 hover:border-[#B9AEE8] transition-all duration-200 cursor-pointer shrink-0"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-white/85 border border-[#867C96]/18 hover:border-[#B9AEE8] transition-all duration-200 cursor-pointer shrink-0"
           >
             <span className="text-base leading-none" aria-hidden="true">
               {current.badgeEmoji}
             </span>
-            <div className="hidden lg:flex flex-col items-start min-w-[120px]">
+            <div className="hidden lg:flex flex-col items-start min-w-[105px]">
               <div className="w-full flex items-center justify-between gap-2 text-[11px] font-bold text-[#2B2438] leading-tight">
-                <span className="truncate max-w-[92px]">{current.title}</span>
+                <span className="truncate max-w-[82px]">{current.title}</span>
                 <span className="font-mono-num text-[#6F5C96]">{progress.xp} XP</span>
               </div>
               <div className="w-full h-1.5 mt-1 rounded-full bg-[#EFEBF7] overflow-hidden">
@@ -154,6 +163,45 @@ export const Header: React.FC<HeaderProps> = ({
               <Flame className="w-3.5 h-3.5 text-[#E5734D]" />
               {progress.streak}d
             </span>
+          </button>
+
+          {/* Student Cloud Login / Account Button */}
+          <button
+            type="button"
+            onClick={onOpenAuth}
+            title={
+              user
+                ? `Signed in as ${user.email} · Cloud Sync Active`
+                : 'Sign in with Google to save & sync across devices'
+            }
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              user
+                ? 'bg-[#E0F2F1] text-[#1F4F4B] border border-[#9ADCD5] hover:bg-[#CEEBE8]'
+                : 'bg-[#6F5C96] text-white hover:bg-[#5E4C84] shadow-2xs'
+            }`}
+          >
+            {user ? (
+              <>
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || 'Account'}
+                    referrerPolicy="no-referrer"
+                    className="w-5 h-5 rounded-full object-cover"
+                  />
+                ) : (
+                  <Cloud className="w-3.5 h-3.5" />
+                )}
+                <span className="hidden sm:inline max-w-[90px] truncate">
+                  {isSyncing ? 'Syncing...' : user.displayName?.split(' ')[0] || 'Synced'}
+                </span>
+              </>
+            ) : (
+              <>
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In</span>
+              </>
+            )}
           </button>
         </div>
       </div>
