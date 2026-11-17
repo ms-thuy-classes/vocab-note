@@ -1,8 +1,12 @@
+import type { SpeechAccent } from '../types/vocab';
+
 let audioCtx: AudioContext | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
-  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const Ctx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Ctx) return null;
   if (!audioCtx) {
     audioCtx = new Ctx();
@@ -13,7 +17,7 @@ function getAudioContext(): AudioContext | null {
   return audioCtx;
 }
 
-export function speakText(text: string, accent: 'en-US' | 'en-GB' = 'en-US'): boolean {
+export function speakText(text: string, accent: SpeechAccent = 'en-US'): boolean {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return false;
   }
@@ -24,13 +28,14 @@ export function speakText(text: string, accent: 'en-US' | 'en-GB' = 'en-US'): bo
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = accent;
-    utterance.rate = 0.94;
+    utterance.rate = accent.startsWith('zh') ? 0.88 : 0.94;
     utterance.pitch = 1.02;
 
     const voices = window.speechSynthesis.getVoices();
+    const langPrefix = accent.slice(0, 2).toLowerCase();
     const matchingVoice =
       voices.find((v) => v.lang.toLowerCase() === accent.toLowerCase()) ||
-      voices.find((v) => v.lang.toLowerCase().startsWith(accent.slice(0, 2).toLowerCase()));
+      voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix));
     if (matchingVoice) {
       utterance.voice = matchingVoice;
     }
@@ -42,7 +47,10 @@ export function speakText(text: string, accent: 'en-US' | 'en-GB' = 'en-US'): bo
   }
 }
 
-export function playFeedbackSound(type: 'correct' | 'incorrect' | 'complete', muted = false): void {
+export function playFeedbackSound(
+  type: 'correct' | 'incorrect' | 'complete',
+  muted = false
+): void {
   if (muted) return;
   const ctx = getAudioContext();
   if (!ctx) return;

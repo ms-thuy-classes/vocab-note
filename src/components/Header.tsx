@@ -12,7 +12,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { getRankForXp } from '../data/seedData';
-import type { UserProgress } from '../types/vocab';
+import type { SpeechAccent, StudyLanguage, UserProgress } from '../types/vocab';
 
 export type ActiveView = 'notebook' | 'flashcards' | 'quiz';
 
@@ -26,7 +26,8 @@ interface HeaderProps {
   user: User | null;
   isSyncing: boolean;
   progress: UserProgress;
-  accent: 'en-US' | 'en-GB';
+  learningLang: StudyLanguage;
+  speechAccent: SpeechAccent;
   onToggleAccent: () => void;
   soundMuted: boolean;
   onToggleMute: () => void;
@@ -43,13 +44,28 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   isSyncing,
   progress,
-  accent,
+  learningLang,
+  speechAccent,
   onToggleAccent,
   soundMuted,
   onToggleMute,
   reminderEnabled,
 }) => {
   const { current, next, progressPercent } = getRankForXp(progress.xp);
+
+  const accentBadgeLabel =
+    learningLang === 'zh'
+      ? speechAccent === 'zh-TW'
+        ? 'TW'
+        : 'CN'
+      : speechAccent === 'en-GB'
+      ? 'UK'
+      : 'US';
+
+  const accentTooltip =
+    learningLang === 'zh'
+      ? `Giọng đọc tiếng Trung: ${speechAccent === 'zh-TW' ? 'Đài Loan (國語)' : 'Phổ thông (普通话)'}`
+      : `Pronunciation accent: ${speechAccent === 'en-GB' ? 'UK English' : 'US English'}`;
 
   return (
     <header className="sticky top-0 z-30 glass-surface border-b border-[#867C96]/15">
@@ -64,7 +80,10 @@ export const Header: React.FC<HeaderProps> = ({
             <BookOpen className="w-4.5 h-4.5 text-[#4D3B73]" />
           </span>
           <span className="text-base sm:text-lg font-bold tracking-tight text-[#2B2438]">
-            Learn with Ms. Thúy <span className="hidden xl:inline font-semibold text-[#6F5C96]">- Vocabulary Note</span>
+            Learn with Ms. Thúy{' '}
+            <span className="hidden xl:inline font-semibold text-[#6F5C96]">
+              - Vocabulary Note
+            </span>
           </span>
         </button>
 
@@ -109,14 +128,13 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Zone 3: Rank, Audio & Cloud Sign-In */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-          {/* Audio controls */}
           <button
             type="button"
             onClick={onToggleAccent}
-            title={`Pronunciation accent: ${accent === 'en-US' ? 'US English' : 'UK English'}`}
+            title={accentTooltip}
             className="hidden sm:inline-flex items-center px-2.5 py-1.5 rounded-xl text-xs font-bold bg-[#F3F0FC] text-[#3F3163] border border-[#D5CEF5] hover:bg-[#E6E6FA] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            {accent === 'en-US' ? 'US' : 'UK'}
+            {accentBadgeLabel}
           </button>
           <button
             type="button"
@@ -128,7 +146,6 @@ export const Header: React.FC<HeaderProps> = ({
             {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
-          {/* Rank & XP Progress */}
           <button
             type="button"
             onClick={onOpenLeaderboard}
@@ -165,7 +182,6 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </button>
 
-          {/* Student Cloud Login / Account Button */}
           <button
             type="button"
             onClick={onOpenAuth}
@@ -246,7 +262,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onToggleAccent}
           className="px-2.5 py-1 rounded-lg whitespace-nowrap shrink-0 bg-[#F3F0FC] text-[#3F3163]"
         >
-          {accent === 'en-US' ? 'US' : 'UK'}
+          {accentBadgeLabel}
         </button>
       </div>
     </header>

@@ -9,21 +9,26 @@ import {
   X,
 } from 'lucide-react';
 import { FOLDER_COLOR_STYLES } from '../data/seedData';
-import type { FolderColor, TopicFolder, VocabWord } from '../types/vocab';
+import type { FolderColor, StudyLanguage, TopicFolder, VocabWord } from '../types/vocab';
 
 interface FolderSidebarProps {
+  studyLanguage: StudyLanguage;
   folders: TopicFolder[];
   words: VocabWord[];
   activeFolderId: string; // 'all' or folder.id
   onSelectFolder: (folderId: string) => void;
   onCreateFolder: (name: string, description: string, color: FolderColor) => void;
-  onUpdateFolder: (id: string, updates: Partial<Pick<TopicFolder, 'name' | 'description' | 'color'>>) => void;
+  onUpdateFolder: (
+    id: string,
+    updates: Partial<Pick<TopicFolder, 'name' | 'description' | 'color'>>
+  ) => void;
   onDeleteFolder: (id: string) => void;
 }
 
 const COLOR_OPTIONS: FolderColor[] = ['lavender', 'blush', 'mint', 'cream', 'sky', 'peach'];
 
 export const FolderSidebar: React.FC<FolderSidebarProps> = ({
+  studyLanguage,
   folders,
   words,
   activeFolderId,
@@ -76,7 +81,9 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
       <div className="glass-card rounded-2xl p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-base font-bold text-[#2B2438]">Topic Folders</h2>
+            <h2 className="text-base font-bold text-[#2B2438]">
+              {studyLanguage === 'zh' ? 'Chủ đề Tiếng Trung' : 'Topic Folders'}
+            </h2>
             <p className="text-xs text-[#5E556E] tabular-nums">
               {folders.length} topics · {words.length} words
             </p>
@@ -105,7 +112,9 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="e.g. IELTS Technology"
+                placeholder={
+                  studyLanguage === 'zh' ? 'VD: HSK 3 - Mua sắm' : 'e.g. IELTS Technology'
+                }
                 autoFocus
                 className="w-full px-3 py-2 rounded-lg bg-white border border-[#867C96]/25 text-sm text-[#2B2438] placeholder:text-[#867C96]"
               />
@@ -135,7 +144,9 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
                     aria-label={FOLDER_COLOR_STYLES[c].label}
                     title={FOLDER_COLOR_STYLES[c].label}
                     className={`w-6 h-6 rounded-full ${FOLDER_COLOR_STYLES[c].swatch} transition-transform cursor-pointer flex items-center justify-center ${
-                      newColor === c ? 'ring-2 ring-offset-2 ring-[#6F5C96] scale-110' : 'opacity-80 hover:opacity-100'
+                      newColor === c
+                        ? 'ring-2 ring-offset-2 ring-[#6F5C96] scale-110'
+                        : 'opacity-80 hover:opacity-100'
                     }`}
                   >
                     {newColor === c && <Check className="w-3 h-3 text-white" />}
@@ -173,7 +184,9 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
         >
           <span className="flex items-center gap-2.5 min-w-0">
             <Layers className="w-4 h-4 text-[#6F5C96] shrink-0" />
-            <span className="text-sm font-bold truncate">All Folders</span>
+            <span className="text-sm font-bold truncate">
+              {studyLanguage === 'zh' ? 'Tất cả chủ đề (中文)' : 'All Folders'}
+            </span>
           </span>
           <span className="text-xs font-bold font-mono-num text-[#5E556E] shrink-0">
             {words.length}
@@ -337,7 +350,19 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
         </div>
         <p className="text-xs font-bold text-[#3F3163]">Ms. Thúy’s Study Tip</p>
         <p className="text-xs text-[#5E556E] mt-1 leading-relaxed">
-          Check the words you want to review, then click <strong className="text-[#2B2438]">Create Flashcards</strong> or <strong className="text-[#2B2438]">Start Smart Quiz</strong> to practice all 4 memory skills.
+          {studyLanguage === 'zh' ? (
+            <>
+              Trong bảng Tiếng Trung, bạn có thể gõ Pinyin dạng số như{' '}
+              <strong className="text-[#2B2438]">ni3 hao3</strong> rồi bấm biểu tượng cây đũa thần để tự chuyển thành{' '}
+              <strong className="text-[#2B2438]">nǐ hǎo</strong>!
+            </>
+          ) : (
+            <>
+              Check the words you want to review, then click{' '}
+              <strong className="text-[#2B2438]">Create Flashcards</strong> or{' '}
+              <strong className="text-[#2B2438]">Start Smart Quiz</strong> to practice all 4 memory skills.
+            </>
+          )}
         </p>
       </div>
     </aside>

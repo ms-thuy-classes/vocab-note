@@ -70,6 +70,16 @@
           "enum": ["en-US", "en-GB"],
           "description": "Preferred English pronunciation accent."
         },
+        "zhAccent": {
+          "type": "string",
+          "enum": ["zh-CN", "zh-TW"],
+          "description": "Preferred Chinese pronunciation accent."
+        },
+        "learningLang": {
+          "type": "string",
+          "enum": ["en", "zh"],
+          "description": "Active vocabulary study language (English or Chinese)."
+        },
         "soundMuted": {
           "type": "boolean",
           "description": "Whether quiz feedback sound effects are muted."
@@ -156,6 +166,11 @@
           "enum": ["lavender", "blush", "mint", "cream", "sky", "peach"],
           "description": "Pastel color theme for the folder."
         },
+        "language": {
+          "type": "string",
+          "enum": ["en", "zh"],
+          "description": "Study language for this folder (en or zh)."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -188,15 +203,20 @@
           "pattern": "^[a-zA-Z0-9_\\-]+$",
           "description": "Parent TopicFolder document ID."
         },
+        "language": {
+          "type": "string",
+          "enum": ["en", "zh"],
+          "description": "Study language for this word (en or zh)."
+        },
         "english": {
           "type": "string",
           "maxLength": 150,
-          "description": "English word or phrase."
+          "description": "Target word (English word or Chinese Hanzi)."
         },
         "ipa": {
           "type": "string",
           "maxLength": 150,
-          "description": "Phonetic IPA transcription."
+          "description": "Phonetic transcription (IPA for English or Pinyin for Chinese)."
         },
         "vietnamese": {
           "type": "string",
@@ -206,7 +226,7 @@
         "example": {
           "type": "string",
           "maxLength": 500,
-          "description": "English example sentence."
+          "description": "Target-language example sentence."
         },
         "exampleVi": {
           "type": "string",
@@ -215,7 +235,7 @@
         },
         "synonyms": {
           "type": "array",
-          "description": "Optional English synonyms (max 15)."
+          "description": "Optional target-language synonyms (max 15)."
         },
         "imageUrl": {
           "type": "string",

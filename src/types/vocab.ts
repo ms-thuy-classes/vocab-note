@@ -1,18 +1,25 @@
 export type FolderColor = 'lavender' | 'blush' | 'mint' | 'cream' | 'sky' | 'peach';
 
+export type StudyLanguage = 'en' | 'zh';
+export type EnglishAccent = 'en-US' | 'en-GB';
+export type ChineseAccent = 'zh-CN' | 'zh-TW';
+export type SpeechAccent = EnglishAccent | ChineseAccent;
+
 export interface TopicFolder {
   id: string;
   name: string;
   description: string;
   color: FolderColor;
+  language?: StudyLanguage;
   createdAt: number;
 }
 
 export interface VocabWord {
   id: string;
   folderId: string;
-  english: string;
-  ipa: string;
+  language?: StudyLanguage;
+  english: string; // Target word: English word or Chinese Hanzi (汉字)
+  ipa: string; // Phonetic: IPA for English or Pinyin for Chinese
   vietnamese: string;
   example: string;
   exampleVi: string;
@@ -68,6 +75,7 @@ export interface QuizQuestion {
   id: string;
   quarter: 1 | 2 | 3 | 4;
   type: QuizQuestionType;
+  language: StudyLanguage;
   word: VocabWord;
   prompt: string;
   subPrompt?: string;
@@ -76,6 +84,7 @@ export interface QuizQuestion {
   acceptedAnswers?: string[];
   scrambledTokens?: string[];
   targetTokens?: string[];
+  isCjkScramble?: boolean;
 }
 
 export interface QuizAnswerRecord {

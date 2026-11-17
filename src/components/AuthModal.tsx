@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
+  Check,
   CheckCircle2,
   Cloud,
+  Copy,
+  ExternalLink,
   Laptop,
   Loader2,
   LogIn,
@@ -10,6 +13,7 @@ import {
   Smartphone,
   X,
 } from 'lucide-react';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -35,8 +39,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
 }) => {
   const [busy, setBusy] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   if (!isOpen) return null;
+
+  const currentDomain =
+    typeof window !== 'undefined' ? window.location.hostname : '';
+  const isUnauthorizedDomain = Boolean(
+    syncError && syncError.includes('auth/unauthorized-domain')
+  );
+  const authSettingsUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+
+  const handleCopyDomain = async () => {
+    if (!currentDomain) return;
+    try {
+      await navigator.clipboard.writeText(currentDomain);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2000);
+    } catch {
+      // Clipboard blocked
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setBusy(true);
@@ -91,8 +114,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         <div className="p-6 space-y-5">
           {syncError && (
-            <div className="p-3 rounded-xl bg-[#FFF2F0] border border-[#F7CBC6] text-xs font-semibold text-[#632F2D]">
-              {syncError}
+            <div className="p-3.5 rounded-xl bg-[#FFF2F0] border border-[#F7CBC6] text-xs text-[#632F2D] space-y-2.5">
+              <p className="font-semibold leading-relaxed">{syncError}</p>
+              {isUnauthorizedDomain && currentDomain && (
+                <div className="p-2.5 rounded-lg bg-white/85 border border-[#F7CBC6] space-y-2 text-[#2B2438]">
+                  <p className="text-[11px] font-semibold text-[#5E556E] leading-relaxed">
+                    Khi chạy trên <strong>Vercel</strong> hoặc tên miền riêng, hãy copy chính xác tên miền dưới đây (không kèm <code>https://</code>, không dùng ký tự <code>*</code> như <code>*.vercel.app</code>) rồi dán vào <strong>Authorized domains</strong> trong Firebase Console:
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 px-2 py-1 rounded bg-[#F3F0FC] text-[11px] font-mono text-[#3F3163] truncate">
+                      {currentDomain}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyDomain}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#E6E6FA] text-[#3F3163] hover:bg-[#D5CEF5] text-[11px] font-bold shrink-0 cursor-pointer"
+                    >
+                      {copiedDomain ? (
+                        <>
+                          <Check className="w-3 h-3" />
+                          <span>Đã copy</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <a
+                    href={authSettingsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#6F5C96] hover:underline"
+                  >
+                    <span>Mở Firebase Auth → Authorized domains</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
             </div>
           )}
 

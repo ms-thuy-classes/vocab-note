@@ -1,4 +1,5 @@
-import type { QuizQuestion, VocabWord } from '../types/vocab';
+import type { QuizQuestion, StudyLanguage, VocabWord } from '../types/vocab';
+import { containsCjk, stripPinyinTones } from './pinyin';
 
 const FALLBACK_VIETNAMESE_DISTRACTORS = [
   'sự kiên nhẫn và bền bỉ',
@@ -18,6 +19,15 @@ const FALLBACK_ENGLISH_DISTRACTORS = [
   'ambitious',
 ];
 
+const FALLBACK_CHINESE_DISTRACTORS = [
+  '认真',
+  '顺利',
+  '耐心',
+  '精彩',
+  '方便',
+  '重要',
+];
+
 function shuffleArray<T>(arr: T[]): T[] {
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -31,23 +41,59 @@ function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createClozeSentence(word: VocabWord): {
+function buildAcceptedTargetAnswers(word: VocabWord, language: StudyLanguage): string[] {
+  const set = new Set<string>();
+  const target = word.english.trim();
+  if (target) set.add(target.toLowerCase());
+
+  if (language === 'zh' && word.ipa.trim()) {
+    const pinyin = word.ipa.trim().toLowerCase();
+    set.add(pinyin);
+    set.add(stripPinyinTones(pinyin));
+  }
+  return Array.from(set);
+}
+
+function createClozeSentence(
+  word: VocabWord,
+  language: StudyLanguage
+): {
   clozeSentence: string;
   acceptedAnswers: string[];
   displayAnswer: string;
 } {
   const rawSentence = (word.example || '').trim();
   const target = word.english.trim();
+  const baseAccepted = buildAcceptedTargetAnswers(word, language);
 
   if (!rawSentence) {
     return {
-      clozeSentence: `Please complete the sentence with the target word: ______ (${word.vietnamese}).`,
-      acceptedAnswers: [target.toLowerCase()],
+      clozeSentence:
+        language === 'zh'
+          ? `请填空 (Điền từ còn thiếu): ______ (${word.vietnamese})`
+          : `Please complete the sentence with the target word: ______ (${word.vietnamese}).`,
+      acceptedAnswers: baseAccepted,
       displayAnswer: target,
     };
   }
 
-  // Exact phrase/word match first
+  // CJK direct substring match (no ASCII word boundaries \b)
+  if (language === 'zh' || containsCjk(target) || containsCjk(rawSentence)) {
+    if (target && rawSentence.includes(target)) {
+      return {
+        clozeSentence: rawSentence.replace(target, '______'),
+        acceptedAnswers: baseAccepted,
+        displayAnswer: target,
+      };
+    }
+    return {
+      clozeSentence: `${rawSentence} → ______`,
+      acceptedAnswers: baseAccepted,
+      displayAnswer: target,
+    };
+  }
+
+  // English exact word/phrase match
   const exactRegex = new RegExp(`\\b(${escapeRegExp(target)})\\b`, 'i');
   const exactMatch = rawSentence.match(exactRegex);
   if (exactMatch && exactMatch[1]) {
@@ -58,7 +104,7 @@ function createClozeSentence(word: VocabWord): {
     };
   }
 
-  // Stem match (e.g. mitigate -> mitigating/mitigates/mitigated)
+  // English stem match
   const stem = target.length > 4 ? target.slice(0, target.length - 1) : target;
   const stemRegex = new RegExp(`\\b(${escapeRegExp(stem)}[a-z]{0,4})\\b`, 'i');
   const stemMatch = rawSentence.match(stemRegex);
@@ -70,75 +116,104 @@ function createClozeSentence(word: VocabWord): {
     };
   }
 
-  // Fallback if example sentence does not explicitly include the exact word
   return {
     clozeSentence: `${rawSentence} → Target word: ______`,
-    acceptedAnswers: [target.toLowerCase()],
+    acceptedAnswers: baseAccepted,
     displayAnswer: target,
   };
 }
 
-function buildScrambledTokens(sentence: string): {
+function buildScrambledTokens(
+  sentence: string,
+  language: StudyLanguage
+): {
   targetTokens: string[];
   scrambledTokens: string[];
+  isCjkScramble: boolean;
 } {
   const cleanSentence = sentence.trim().replace(/\s+/g, ' ');
-  const tokens = cleanSentence.split(' ').filter(Boolean);
+  const isCjk = language === 'zh' || (containsCjk(cleanSentence) && !cleanSentence.includes(' '));
+
+  let tokens: string[];
+  if (isCjk) {
+    // Split CJK text into clean tokens, attaching trailing punctuation to preceding char
+    const chars = Array.from(cleanSentence.replace(/\s+/g, ''));
+    const punctSet = new Set(['。', '，', '？', '！', '、', '；', '：', '.', ',', '?', '!']);
+    tokens = [];
+    for (const ch of chars) {
+      if (punctSet.has(ch) && tokens.length > 0) {
+        tokens[tokens.length - 1] = tokens[tokens.length - 1] + ch;
+      } else {
+        tokens.push(ch);
+      }
+    }
+  } else {
+    tokens = cleanSentence.split(' ').filter(Boolean);
+  }
 
   if (tokens.length <= 1) {
     return {
       targetTokens: tokens,
       scrambledTokens: tokens,
+      isCjkScramble: isCjk,
     };
   }
 
   let scrambled = shuffleArray(tokens);
   let attempts = 0;
-  while (scrambled.join(' ') === tokens.join(' ') && attempts < 8) {
+  while (scrambled.join('') === tokens.join('') && attempts < 8) {
     scrambled = shuffleArray(tokens);
     attempts++;
   }
-  if (scrambled.join(' ') === tokens.join(' ') && scrambled.length >= 2) {
+  if (scrambled.join('') === tokens.join('') && scrambled.length >= 2) {
     [scrambled[0], scrambled[1]] = [scrambled[1], scrambled[0]];
   }
 
   return {
     targetTokens: tokens,
     scrambledTokens: scrambled,
+    isCjkScramble: isCjk,
   };
 }
 
 export function generateSmartQuiz(
   selectedWords: VocabWord[],
-  allWordsPool: VocabWord[]
+  allWordsPool: VocabWord[],
+  studyLanguage: StudyLanguage = 'en'
 ): QuizQuestion[] {
   if (selectedWords.length === 0) return [];
 
-  // Ensure exact 25% per quarter by making total questions a multiple of 4
   const totalQuestions = Math.max(4, Math.ceil(selectedWords.length / 4) * 4);
   const perQuarter = totalQuestions / 4;
 
-  // Build balanced list of words of length `totalQuestions` where every selected word appears at least once
   const shuffledSelected = shuffleArray(selectedWords);
   const assignedWords: VocabWord[] = [];
   for (let i = 0; i < totalQuestions; i++) {
     assignedWords.push(shuffledSelected[i % shuffledSelected.length]);
   }
 
-  const pool = allWordsPool.length >= selectedWords.length ? allWordsPool : selectedWords;
+  const sameLangPool = allWordsPool.filter(
+    (w) => (w.language || 'en') === studyLanguage
+  );
+  const pool = sameLangPool.length >= selectedWords.length ? sameLangPool : selectedWords;
   const questions: QuizQuestion[] = [];
 
   for (let idx = 0; idx < totalQuestions; idx++) {
     const word = assignedWords[idx];
+    const wordLang: StudyLanguage = word.language || studyLanguage;
     const quarter = (Math.floor(idx / perQuarter) + 1) as 1 | 2 | 3 | 4;
 
     if (quarter === 1) {
-      // Quarter 1: English -> Vietnamese
       const distractorPool = shuffleArray(
         Array.from(
           new Set(
             pool
-              .filter((w) => w.id !== word.id && w.vietnamese.trim() && w.vietnamese.trim() !== word.vietnamese.trim())
+              .filter(
+                (w) =>
+                  w.id !== word.id &&
+                  w.vietnamese.trim() &&
+                  w.vietnamese.trim() !== word.vietnamese.trim()
+              )
               .map((w) => w.vietnamese.trim())
           )
         )
@@ -156,6 +231,7 @@ export function generateSmartQuiz(
         id: `q-${idx}-${word.id}-q1`,
         quarter: 1,
         type: 'en_to_vi',
+        language: wordLang,
         word,
         prompt: word.english,
         subPrompt: word.ipa || undefined,
@@ -163,34 +239,46 @@ export function generateSmartQuiz(
         correctAnswer: word.vietnamese.trim(),
       });
     } else if (quarter === 2) {
-      // Quarter 2: Vietnamese -> English (Active Recall)
       questions.push({
         id: `q-${idx}-${word.id}-q2`,
         quarter: 2,
         type: 'vi_to_en',
+        language: wordLang,
         word,
         prompt: word.vietnamese,
-        subPrompt: 'Type the exact English word or phrase matching this Vietnamese meaning.',
+        subPrompt:
+          wordLang === 'zh'
+            ? 'Gõ chữ Hán (汉字) hoặc phiên âm Pinyin tương ứng với nghĩa tiếng Việt này.'
+            : 'Type the exact English word or phrase matching this Vietnamese meaning.',
         correctAnswer: word.english.trim(),
-        acceptedAnswers: [word.english.trim().toLowerCase()],
+        acceptedAnswers: buildAcceptedTargetAnswers(word, wordLang),
       });
     } else if (quarter === 3) {
-      // Quarter 3: Fill-in-the-Blank Cloze Test
-      const { clozeSentence, acceptedAnswers, displayAnswer } = createClozeSentence(word);
+      const { clozeSentence, acceptedAnswers, displayAnswer } = createClozeSentence(
+        word,
+        wordLang
+      );
       questions.push({
         id: `q-${idx}-${word.id}-q3`,
         quarter: 3,
         type: 'cloze',
+        language: wordLang,
         word,
         prompt: clozeSentence,
-        subPrompt: `Hint: ${word.vietnamese}`,
+        subPrompt:
+          wordLang === 'zh'
+            ? `Gợi ý: ${word.vietnamese} (nhập chữ Hán hoặc Pinyin)`
+            : `Hint: ${word.vietnamese}`,
         correctAnswer: displayAnswer,
         acceptedAnswers,
       });
     } else {
-      // Quarter 4: Adaptive Synonym OR Drag-and-Drop Sentence Scramble
       const validSynonyms = (word.synonyms || []).map((s) => s.trim()).filter(Boolean);
-      const hasExampleForScramble = (word.example || '').trim().split(/\s+/).length >= 3;
+      const minLenForScramble = wordLang === 'zh' ? 3 : 3;
+      const exampleTokenCount =
+        wordLang === 'zh'
+          ? Array.from((word.example || '').trim()).length
+          : (word.example || '').trim().split(/\s+/).length;
 
       if (validSynonyms.length > 0) {
         const chosenSynonym = validSynonyms[0];
@@ -210,7 +298,9 @@ export function generateSmartQuiz(
           )
         );
         const options = [...candidatePool.slice(0, 3)];
-        for (const fallback of FALLBACK_ENGLISH_DISTRACTORS) {
+        const fallbackList =
+          wordLang === 'zh' ? FALLBACK_CHINESE_DISTRACTORS : FALLBACK_ENGLISH_DISTRACTORS;
+        for (const fallback of fallbackList) {
           if (options.length >= 3) break;
           if (!lowerExcluded.has(fallback) && !options.includes(fallback)) {
             options.push(fallback);
@@ -222,28 +312,43 @@ export function generateSmartQuiz(
           id: `q-${idx}-${word.id}-q4-syn`,
           quarter: 4,
           type: 'synonym',
+          language: wordLang,
           word,
           prompt: word.english,
-          subPrompt: 'Select the closest English synonym for this word.',
+          subPrompt:
+            wordLang === 'zh'
+              ? `Chọn từ đồng nghĩa tiếng Trung gần nhất với "${word.english}" (${word.ipa}).`
+              : 'Select the closest English synonym for this word.',
           options: shuffleArray(options),
           correctAnswer: chosenSynonym,
         });
       } else {
-        const sentenceSource = hasExampleForScramble
-          ? word.example
-          : `We practice the word ${word.english} every day.`;
-        const { targetTokens, scrambledTokens } = buildScrambledTokens(sentenceSource);
+        const sentenceSource =
+          exampleTokenCount >= minLenForScramble
+            ? word.example
+            : wordLang === 'zh'
+            ? `我们每天都练习${word.english}。`
+            : `We practice the word ${word.english} every day.`;
+        const { targetTokens, scrambledTokens, isCjkScramble } = buildScrambledTokens(
+          sentenceSource,
+          wordLang
+        );
 
         questions.push({
           id: `q-${idx}-${word.id}-q4-scr`,
           quarter: 4,
           type: 'scramble',
+          language: wordLang,
           word,
           prompt: word.vietnamese,
-          subPrompt: `Arrange the words into the correct English sentence using "${word.english}".`,
-          correctAnswer: targetTokens.join(' '),
+          subPrompt:
+            wordLang === 'zh'
+              ? `Sắp xếp các chữ Hán thành câu hoàn chỉnh chứa từ "${word.english}".`
+              : `Arrange the words into the correct English sentence using "${word.english}".`,
+          correctAnswer: isCjkScramble ? targetTokens.join('') : targetTokens.join(' '),
           targetTokens,
           scrambledTokens,
+          isCjkScramble,
         });
       }
     }

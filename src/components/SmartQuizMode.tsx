@@ -11,26 +11,27 @@ import {
   Volume2,
   XCircle,
 } from 'lucide-react';
-import type { QuizAnswerRecord, QuizQuestion, VocabWord } from '../types/vocab';
+import type {
+  QuizAnswerRecord,
+  QuizQuestion,
+  SpeechAccent,
+  StudyLanguage,
+  VocabWord,
+} from '../types/vocab';
 import { playFeedbackSound, speakText } from '../utils/audio';
+import { stripPinyinTones } from '../utils/pinyin';
 import { generateSmartQuiz } from '../utils/quizGenerator';
 
 interface SmartQuizModeProps {
   selectedWords: VocabWord[];
   allWordsPool: VocabWord[];
-  accent: 'en-US' | 'en-GB';
+  studyLanguage: StudyLanguage;
+  speechAccent: SpeechAccent;
   soundMuted: boolean;
   onQuestionAnswered: (isCorrect: boolean, xpEarned: number) => void;
   onQuizCompleted: (bonusXp: number) => void;
   onExit: () => void;
 }
-
-const QUARTER_LABELS: Record<1 | 2 | 3 | 4, string> = {
-  1: 'Quarter 1 (25%) · English → Vietnamese',
-  2: 'Quarter 2 (25%) · Vietnamese → English',
-  3: 'Quarter 3 (25%) · Fill-in-the-Blank Cloze Test',
-  4: 'Quarter 4 (25%) · Synonyms & Sentence Scramble',
-};
 
 interface ScrambleTile {
   uid: string;
@@ -40,21 +41,21 @@ interface ScrambleTile {
 export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
   selectedWords,
   allWordsPool,
-  accent,
+  studyLanguage,
+  speechAccent,
   soundMuted,
   onQuestionAnswered,
   onQuizCompleted,
   onExit,
 }) => {
   const [questions, setQuestions] = useState<QuizQuestion[]>(() =>
-    generateSmartQuiz(selectedWords, allWordsPool)
+    generateSmartQuiz(selectedWords, allWordsPool, studyLanguage)
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [typedAnswer, setTypedAnswer] = useState<string>('');
   const [showHint, setShowHint] = useState(false);
 
-  // Scramble state
   const [bankTiles, setBankTiles] = useState<ScrambleTile[]>([]);
   const [answerTiles, setAnswerTiles] = useState<ScrambleTile[]>([]);
   const [draggedTile, setDraggedTile] = useState<{
@@ -62,15 +63,28 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
     source: 'bank' | 'answer';
   } | null>(null);
 
-  // Feedback & Results state
   const [checkedRecord, setCheckedRecord] = useState<QuizAnswerRecord | null>(null);
   const [records, setRecords] = useState<QuizAnswerRecord[]>([]);
   const [isFinished, setIsFinished] = useState(false);
   const [sessionXp, setSessionXp] = useState(0);
 
   const currentQuestion = questions[currentIndex];
+  const isZh = (currentQuestion?.language || studyLanguage) === 'zh';
 
-  // Reset per-question inputs cleanly when question changes
+  const quarterLabels: Record<1 | 2 | 3 | 4, string> = isZh
+    ? {
+        1: 'Phần 1 (25%) · Tiếng Trung → Tiếng Việt',
+        2: 'Phần 2 (25%) · Tiếng Việt → Tiếng Trung',
+        3: 'Phần 3 (25%) · Điền từ vào chỗ trống (Cloze)',
+        4: 'Phần 4 (25%) · Từ đồng nghĩa & Xếp câu',
+      }
+    : {
+        1: 'Quarter 1 (25%) · English → Vietnamese',
+        2: 'Quarter 2 (25%) · Vietnamese → English',
+        3: 'Quarter 3 (25%) · Fill-in-the-Blank Cloze Test',
+        4: 'Quarter 4 (25%) · Synonyms & Sentence Scramble',
+      };
+
   useEffect(() => {
     setSelectedOption('');
     setTypedAnswer('');
@@ -118,12 +132,16 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
     } else if (currentQuestion.type === 'vi_to_en' || currentQuestion.type === 'cloze') {
       userAnswer = typedAnswer.trim();
       const normalized = userAnswer.toLowerCase().replace(/\s+/g, ' ');
+      const stripped = stripPinyinTones(normalized);
       const accepted = currentQuestion.acceptedAnswers || [
         currentQuestion.correctAnswer.trim().toLowerCase(),
       ];
-      isCorrect = accepted.includes(normalized);
+      isCorrect =
+        accepted.includes(normalized) ||
+        (isZh && accepted.includes(stripped));
     } else if (currentQuestion.type === 'scramble') {
-      userAnswer = answerTiles.map((t) => t.text).join(' ').trim();
+      const joiner = currentQuestion.isCjkScramble ? '' : ' ';
+      userAnswer = answerTiles.map((t) => t.text).join(joiner).trim();
       isCorrect = userAnswer === currentQuestion.correctAnswer.trim();
     }
 
@@ -157,7 +175,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
   };
 
   const handleRestartWithWords = (wordList: VocabWord[]) => {
-    const newQuestions = generateSmartQuiz(wordList, allWordsPool);
+    const newQuestions = generateSmartQuiz(wordList, allWordsPool, studyLanguage);
     setQuestions(newQuestions);
     setCurrentIndex(0);
     setRecords([]);
@@ -166,7 +184,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
     setSessionXp(0);
   };
 
-  // Scramble move handlers (supports both click and drag-and-drop)
   const moveTileToAnswer = (tile: ScrambleTile) => {
     if (checkedRecord) return;
     setBankTiles((prev) => prev.filter((t) => t.uid !== tile.uid));
@@ -233,13 +250,11 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
     );
   }
 
-  // Final Results & Review Summary Screen
   if (isFinished) {
     const correctCount = records.filter((r) => r.isCorrect).length;
     const totalCount = records.length;
     const pct = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
 
-    // Deduplicate missed words for review
     const missedMap = new Map<string, QuizAnswerRecord>();
     for (const rec of records) {
       if (!rec.isCorrect && !missedMap.has(rec.question.word.id)) {
@@ -257,9 +272,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
           </div>
 
           <div>
-            <h2 className="text-2xl sm:text-3xl font-bold text-[#2B2438]">
-              Smart Quiz Complete!
-            </h2>
+            <h2 className="text-2xl sm:text-3xl font-bold text-[#2B2438]">Smart Quiz Complete!</h2>
             <p className="text-lg font-bold text-[#6F5C96] mt-2 font-mono-num">
               {correctCount} / {totalCount} Correct - {pct}%
             </p>
@@ -268,7 +281,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
             </p>
           </div>
 
-          {/* 4-Quarter Breakdown */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-left">
             {([1, 2, 3, 4] as const).map((qNum) => {
               const qRecs = records.filter((r) => r.question.quarter === qNum);
@@ -316,7 +328,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
           </div>
         </div>
 
-        {/* Dedicated Words to Review Section */}
         <div className="glass-card rounded-2xl p-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
@@ -326,7 +337,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
               <p className="text-xs text-[#5E556E]">
                 {missedRecords.length === 0
                   ? 'Perfect score! No missed words to review.'
-                  : 'Review each missed word carefully with its IPA, Vietnamese meaning, and example sentence.'}
+                  : 'Review each missed word carefully with its transcription, Vietnamese meaning, and example sentence.'}
               </p>
             </div>
             {missedWords.length > 0 && (
@@ -357,7 +368,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
                       )}
                       <button
                         type="button"
-                        onClick={() => speakText(question.word.english, accent)}
+                        onClick={() => speakText(question.word.english, speechAccent)}
                         className="p-1.5 rounded-lg bg-[#F3F0FC] text-[#3F3163] hover:bg-[#E6E6FA] cursor-pointer"
                         aria-label={`Pronounce ${question.word.english}`}
                       >
@@ -395,7 +406,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
 
   return (
     <div className="max-w-2xl mx-auto py-6 px-4 space-y-5">
-      {/* Top Progress Header */}
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
@@ -413,7 +423,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs font-bold text-[#6F5C96]">
-          <span>{QUARTER_LABELS[currentQuestion.quarter]}</span>
+          <span>{quarterLabels[currentQuestion.quarter]}</span>
           <span className="font-mono-num">{progressPct}%</span>
         </div>
         <div className="w-full h-2.5 rounded-full bg-white/85 border border-[#867C96]/15 overflow-hidden">
@@ -426,16 +436,22 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
 
       {/* Strictly ONE Question Card */}
       <div className="glass-card rounded-2xl p-6 sm:p-8 space-y-6">
-        {/* Question Prompt */}
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1.5">
               <p className="text-xs font-bold text-[#867C96]">
-                {currentQuestion.type === 'en_to_vi' && 'Choose the Vietnamese meaning'}
-                {currentQuestion.type === 'vi_to_en' && 'Translate into English'}
-                {currentQuestion.type === 'cloze' && 'Complete the sentence with the missing word'}
-                {currentQuestion.type === 'synonym' && 'Find the English synonym'}
-                {currentQuestion.type === 'scramble' && 'Drag or click words to build the English sentence'}
+                {currentQuestion.type === 'en_to_vi' &&
+                  (isZh ? 'Chọn nghĩa tiếng Việt đúng' : 'Choose the Vietnamese meaning')}
+                {currentQuestion.type === 'vi_to_en' &&
+                  (isZh ? 'Dịch sang Tiếng Trung (汉字 hoặc Pinyin)' : 'Translate into English')}
+                {currentQuestion.type === 'cloze' &&
+                  (isZh ? 'Điền từ Tiếng Trung còn thiếu vào câu' : 'Complete the sentence with the missing word')}
+                {currentQuestion.type === 'synonym' &&
+                  (isZh ? 'Chọn từ đồng nghĩa Tiếng Trung' : 'Find the English synonym')}
+                {currentQuestion.type === 'scramble' &&
+                  (isZh
+                    ? 'Kéo thả hoặc nhấn để xếp câu Tiếng Trung hoàn chỉnh'
+                    : 'Drag or click words to build the English sentence')}
               </p>
               <h2 className="text-2xl sm:text-3xl font-bold text-[#2B2438] leading-snug">
                 {currentQuestion.prompt}
@@ -457,14 +473,13 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
             )}
           </div>
 
-          {/* Helpful Audio / Letter Hint Row */}
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {(currentQuestion.type === 'en_to_vi' ||
               currentQuestion.type === 'synonym' ||
               currentQuestion.type === 'vi_to_en') && (
               <button
                 type="button"
-                onClick={() => speakText(targetWord.english, accent)}
+                onClick={() => speakText(targetWord.english, speechAccent)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F3F0FC] text-[#3F3163] hover:bg-[#E6E6FA] text-xs font-bold cursor-pointer"
               >
                 <Volume2 className="w-3.5 h-3.5" />
@@ -484,7 +499,11 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
                   <HelpCircle className="w-3.5 h-3.5" />
                   <span>
                     {showHint
-                      ? `Starts with "${currentQuestion.correctAnswer[0]}" (${currentQuestion.correctAnswer.length} letters)`
+                      ? isZh && targetWord.ipa
+                        ? `Pinyin: ${targetWord.ipa} (${targetWord.english.length} chữ)`
+                        : `Starts with "${currentQuestion.correctAnswer[0]}" (${currentQuestion.correctAnswer.length} chars)`
+                      : isZh
+                      ? 'Gợi ý Pinyin'
                       : 'Letter Hint'}
                   </span>
                 </button>
@@ -492,7 +511,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
           </div>
         </div>
 
-        {/* Question Mechanics */}
         {(currentQuestion.type === 'en_to_vi' || currentQuestion.type === 'synonym') && (
           <div className="grid grid-cols-1 gap-2.5">
             {currentQuestion.options?.map((opt, idx) => {
@@ -552,7 +570,11 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
                   handleCheckAnswer();
                 }
               }}
-              placeholder="Type your English answer here..."
+              placeholder={
+                isZh
+                  ? 'Nhập chữ Hán (VD: 谢谢) hoặc Pinyin (VD: xiexie)...'
+                  : 'Type your English answer here...'
+              }
               autoFocus
               className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-[#D5CEF5] focus:border-[#6F5C96] text-base font-bold text-[#2B2438] placeholder:text-[#867C96] disabled:bg-[#FAF7FD]"
             />
@@ -561,7 +583,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
 
         {currentQuestion.type === 'scramble' && (
           <div className="space-y-4">
-            {/* Answer Drop Zone */}
             <div>
               <p className="text-xs font-bold text-[#5E556E] mb-2">
                 Your Sentence (drag or click tiles to arrange & reorder):
@@ -598,7 +619,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
               </div>
             </div>
 
-            {/* Word Tile Bank */}
             <div>
               <p className="text-xs font-bold text-[#5E556E] mb-2">Word Tiles:</p>
               <div
@@ -608,7 +628,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
               >
                 {bankTiles.length === 0 ? (
                   <span className="text-xs font-semibold text-[#867C96] mx-auto">
-                    All words placed above — click any tile above to move it back.
+                    All tiles placed above — click any tile above to move it back.
                   </span>
                 ) : (
                   bankTiles.map((tile) => (
@@ -630,7 +650,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
           </div>
         )}
 
-        {/* Instant Feedback Panel (Always shows Full Vietnamese Meaning & Full Example Translation) */}
+        {/* Instant Feedback Panel */}
         {checkedRecord && (
           <div
             className={`p-5 rounded-2xl border space-y-3 ${
@@ -654,7 +674,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => speakText(targetWord.example || targetWord.english, accent)}
+                onClick={() => speakText(targetWord.example || targetWord.english, speechAccent)}
                 className="p-2 rounded-xl bg-white/80 text-[#2B2438] hover:bg-white shrink-0 cursor-pointer"
                 aria-label="Listen to pronunciation"
               >
@@ -673,9 +693,7 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
 
               {targetWord.example && (
                 <div className="pt-1 border-t border-[#867C96]/15 text-xs space-y-0.5">
-                  <p className="font-semibold text-[#2B2438]">
-                    Example: {targetWord.example}
-                  </p>
+                  <p className="font-semibold text-[#2B2438]">Example: {targetWord.example}</p>
                   <p className="text-[#5E556E]">
                     Nghĩa câu ví dụ:{' '}
                     {targetWord.exampleVi ||
@@ -687,7 +705,6 @@ export const SmartQuizMode: React.FC<SmartQuizModeProps> = ({
           </div>
         )}
 
-        {/* Action Button Row: Check Answer -> Next Question */}
         <div className="flex items-center justify-end pt-1">
           {!checkedRecord ? (
             <button

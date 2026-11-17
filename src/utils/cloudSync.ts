@@ -17,8 +17,11 @@ import {
 import { getTodayIsoDate } from '../data/seedData';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import type {
+  ChineseAccent,
+  EnglishAccent,
   FolderColor,
   ReminderSettings,
+  StudyLanguage,
   TopicFolder,
   UserProgress,
   VocabWord,
@@ -64,6 +67,10 @@ function sanitizeColor(val: unknown): FolderColor {
   return 'lavender';
 }
 
+function sanitizeLanguage(val: unknown): StudyLanguage {
+  return val === 'zh' ? 'zh' : 'en';
+}
+
 function sanitizeSynonyms(val: unknown): string[] {
   if (!Array.isArray(val)) return [];
   return val
@@ -83,7 +90,9 @@ function sanitizeReminderFolderIds(val: unknown): string[] {
 export interface CloudUserBundle {
   progress: UserProgress;
   reminders: ReminderSettings;
-  accent: 'en-US' | 'en-GB';
+  accent: EnglishAccent;
+  zhAccent: ChineseAccent;
+  learningLang: StudyLanguage;
   soundMuted: boolean;
 }
 
@@ -107,6 +116,8 @@ export function buildUserProfileDoc(
     totalQuizzesCompleted: clampNonNegInt(bundle.progress.totalQuizzesCompleted, 0),
     totalCorrectAnswers: clampNonNegInt(bundle.progress.totalCorrectAnswers, 0),
     accent: bundle.accent === 'en-GB' ? 'en-GB' : 'en-US',
+    zhAccent: bundle.zhAccent === 'zh-TW' ? 'zh-TW' : 'zh-CN',
+    learningLang: sanitizeLanguage(bundle.learningLang),
     soundMuted: Boolean(bundle.soundMuted),
     reminderEnabled: Boolean(bundle.reminders.enabled),
     reminderEmail: clampStr(bundle.reminders.email || userEmail, 200),
@@ -127,6 +138,7 @@ export function buildFolderDoc(uid: string, folder: TopicFolder, includeCreatedA
     name: clampStr(folder.name.trim() || 'Untitled Folder', 100, 'Untitled Folder'),
     description: clampStr(folder.description || '', 300),
     color: sanitizeColor(folder.color),
+    language: sanitizeLanguage(folder.language),
     updatedAt: serverTimestamp(),
   };
   if (includeCreatedAt) {
@@ -139,6 +151,7 @@ export function buildWordDoc(uid: string, word: VocabWord, includeCreatedAt: boo
   const base: Record<string, unknown> = {
     ownerId: sanitizeId(uid, 'user'),
     folderId: sanitizeId(word.folderId, 'folder'),
+    language: sanitizeLanguage(word.language),
     english: clampStr(word.english || '', 150),
     ipa: clampStr(word.ipa || '', 150),
     vietnamese: clampStr(word.vietnamese || '', 300),
@@ -155,10 +168,6 @@ export function buildWordDoc(uid: string, word: VocabWord, includeCreatedAt: boo
   return base;
 }
 
-/**
- * Checks if the authenticated student already has a cloud profile.
- * If not, atomically seeds their current folders, words, progress, and reminders into Firestore.
- */
 export async function ensureCloudUserInitialized(
   user: User,
   localState: {
@@ -166,7 +175,9 @@ export async function ensureCloudUserInitialized(
     words: VocabWord[];
     progress: UserProgress;
     reminders: ReminderSettings;
-    accent: 'en-US' | 'en-GB';
+    accent: EnglishAccent;
+    zhAccent: ChineseAccent;
+    learningLang: StudyLanguage;
     soundMuted: boolean;
   }
 ): Promise<boolean> {
@@ -181,10 +192,9 @@ export async function ensureCloudUserInitialized(
   }
 
   if (snap.exists()) {
-    return false; // Existing cloud account — load cloud data via onSnapshot
+    return false;
   }
 
-  // First-time sign-in: migrate current notebook into Firestore in safe batches
   const displayName =
     user.displayName?.trim() ||
     (localState.progress.studentName !== 'You (Class 12A)'
@@ -201,6 +211,8 @@ export async function ensureCloudUserInitialized(
       email: localState.reminders.email || user.email || '',
     },
     accent: localState.accent,
+    zhAccent: localState.zhAccent,
+    learningLang: localState.learningLang,
     soundMuted: localState.soundMuted,
   };
 
@@ -216,11 +228,11 @@ export async function ensureCloudUserInitialized(
       batch1.set(folderRef, buildFolderDoc(user.uid, { ...folder, id: safeFolderId }, true));
     }
 
-    // Commit user profile + folders first (satisfies existsAfter cleanly even if many words)
     const firstChunkWords = localState.words.slice(0, 350);
     for (const word of firstChunkWords) {
       const safeWordId = sanitizeId(word.id, 'word');
-      const mappedFolderId = validFolderIdMap.get(word.folderId) || sanitizeId(word.folderId, 'folder');
+      const mappedFolderId =
+        validFolderIdMap.get(word.folderId) || sanitizeId(word.folderId, 'folder');
       const wordRef = doc(db, 'users', user.uid, 'words', safeWordId);
       batch1.set(
         wordRef,
@@ -230,7 +242,6 @@ export async function ensureCloudUserInitialized(
 
     await batch1.commit();
 
-    // Commit any remaining words if > 350
     for (let i = 350; i < localState.words.length; i += 400) {
       const chunk = localState.words.slice(i, i + 400);
       const nextBatch = writeBatch(db);
@@ -250,6 +261,35 @@ export async function ensureCloudUserInitialized(
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, userPath);
+  }
+}
+
+export async function seedLanguagePackInCloud(
+  uid: string,
+  folders: TopicFolder[],
+  words: VocabWord[]
+): Promise<void> {
+  const path = `users/${uid}/folders`;
+  try {
+    const batch = writeBatch(db);
+    for (const folder of folders) {
+      const safeFid = sanitizeId(folder.id, 'folder');
+      batch.set(
+        doc(db, 'users', uid, 'folders', safeFid),
+        buildFolderDoc(uid, { ...folder, id: safeFid }, true)
+      );
+    }
+    for (const word of words.slice(0, 350)) {
+      const safeWid = sanitizeId(word.id, 'word');
+      const safeFid = sanitizeId(word.folderId, 'folder');
+      batch.set(
+        doc(db, 'users', uid, 'words', safeWid),
+        buildWordDoc(uid, { ...word, id: safeWid, folderId: safeFid }, true)
+      );
+    }
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
@@ -308,6 +348,8 @@ export function subscribeToCloudUserData(
           selectedFolderIds: Array.isArray(d.reminderFolderIds) ? d.reminderFolderIds : [],
         },
         accent: d.accent === 'en-GB' ? 'en-GB' : 'en-US',
+        zhAccent: d.zhAccent === 'zh-TW' ? 'zh-TW' : 'zh-CN',
+        learningLang: d.learningLang === 'zh' ? 'zh' : 'en',
         soundMuted: Boolean(d.soundMuted),
       });
     },
@@ -332,6 +374,7 @@ export function subscribeToCloudUserData(
           name: typeof d.name === 'string' ? d.name : 'Folder',
           description: typeof d.description === 'string' ? d.description : '',
           color: sanitizeColor(d.color),
+          language: sanitizeLanguage(d.language),
           createdAt: ts,
         };
       });
@@ -357,6 +400,7 @@ export function subscribeToCloudUserData(
         return {
           id: docSnap.id,
           folderId: typeof d.folderId === 'string' ? d.folderId : '',
+          language: sanitizeLanguage(d.language),
           english: typeof d.english === 'string' ? d.english : '',
           ipa: typeof d.ipa === 'string' ? d.ipa : '',
           vietnamese: typeof d.vietnamese === 'string' ? d.vietnamese : '',
@@ -459,6 +503,7 @@ export async function updateCloudWord(
   const path = `users/${uid}/words/${safeId}`;
   const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (updates.folderId !== undefined) payload.folderId = sanitizeId(updates.folderId, 'folder');
+  if (updates.language !== undefined) payload.language = sanitizeLanguage(updates.language);
   if (updates.english !== undefined) payload.english = clampStr(updates.english, 150);
   if (updates.ipa !== undefined) payload.ipa = clampStr(updates.ipa, 150);
   if (updates.vietnamese !== undefined) payload.vietnamese = clampStr(updates.vietnamese, 300);
@@ -511,14 +556,20 @@ export async function updateCloudUserProgress(
 
 export async function updateCloudUserPrefs(
   uid: string,
-  accent: 'en-US' | 'en-GB',
-  soundMuted: boolean
+  prefs: {
+    accent: EnglishAccent;
+    zhAccent: ChineseAccent;
+    learningLang: StudyLanguage;
+    soundMuted: boolean;
+  }
 ): Promise<void> {
   const path = `users/${uid}`;
   try {
     await updateDoc(doc(db, 'users', uid), {
-      accent: accent === 'en-GB' ? 'en-GB' : 'en-US',
-      soundMuted: Boolean(soundMuted),
+      accent: prefs.accent === 'en-GB' ? 'en-GB' : 'en-US',
+      zhAccent: prefs.zhAccent === 'zh-TW' ? 'zh-TW' : 'zh-CN',
+      learningLang: sanitizeLanguage(prefs.learningLang),
+      soundMuted: Boolean(prefs.soundMuted),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -555,7 +606,6 @@ export async function replaceCloudBackup(
 ): Promise<void> {
   const path = `users/${uid}`;
   try {
-    // Delete old words & folders in chunks, then write new ones
     const delBatch = writeBatch(db);
     for (const wid of existingWordIds.slice(0, 220)) {
       delBatch.delete(doc(db, 'users', uid, 'words', sanitizeId(wid, 'word')));
@@ -569,7 +619,10 @@ export async function replaceCloudBackup(
     writeB.update(doc(db, 'users', uid), buildUserProfileDoc(uid, userEmail, bundle, false));
     for (const f of folders) {
       const safeFid = sanitizeId(f.id, 'folder');
-      writeB.set(doc(db, 'users', uid, 'folders', safeFid), buildFolderDoc(uid, { ...f, id: safeFid }, true));
+      writeB.set(
+        doc(db, 'users', uid, 'folders', safeFid),
+        buildFolderDoc(uid, { ...f, id: safeFid }, true)
+      );
     }
     for (const w of words.slice(0, 350)) {
       const safeWid = sanitizeId(w.id, 'word');

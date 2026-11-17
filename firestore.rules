@@ -57,8 +57,8 @@ service cloud.firestore {
       && data.keys().hasOnly([
         'ownerId', 'studentName', 'email', 'xp', 'dailyXp', 'todayDate',
         'streak', 'lastActiveDate', 'totalWordsAdded', 'totalFlashcardsCompleted',
-        'totalQuizzesCompleted', 'totalCorrectAnswers', 'accent', 'soundMuted',
-        'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds',
+        'totalQuizzesCompleted', 'totalCorrectAnswers', 'accent', 'zhAccent', 'learningLang',
+        'soundMuted', 'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds',
         'createdAt', 'updatedAt'
       ])
       && isValidId(data.ownerId)
@@ -75,6 +75,8 @@ service cloud.firestore {
       && data.totalQuizzesCompleted is number && data.totalQuizzesCompleted >= 0
       && data.totalCorrectAnswers is number && data.totalCorrectAnswers >= 0
       && data.accent in ['en-US', 'en-GB']
+      && (!('zhAccent' in data) || data.zhAccent in ['zh-CN', 'zh-TW'])
+      && (!('learningLang' in data) || data.learningLang in ['en', 'zh'])
       && data.soundMuted is bool
       && data.reminderEnabled is bool
       && data.reminderEmail is string && data.reminderEmail.size() <= 200
@@ -88,12 +90,13 @@ service cloud.firestore {
 
     function isValidFolder(data) {
       return data.keys().hasAll(['ownerId', 'name', 'description', 'color', 'createdAt', 'updatedAt'])
-      && data.keys().hasOnly(['ownerId', 'name', 'description', 'color', 'createdAt', 'updatedAt'])
+      && data.keys().hasOnly(['ownerId', 'name', 'description', 'color', 'language', 'createdAt', 'updatedAt'])
       && isValidId(data.ownerId)
       && data.ownerId == request.auth.uid
       && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
       && data.description is string && data.description.size() <= 300
       && data.color in ['lavender', 'blush', 'mint', 'cream', 'sky', 'peach']
+      && (!('language' in data) || data.language in ['en', 'zh'])
       && data.createdAt is timestamp
       && data.updatedAt is timestamp;
     }
@@ -104,12 +107,13 @@ service cloud.firestore {
         'exampleVi', 'synonyms', 'imageUrl', 'mastered', 'createdAt', 'updatedAt'
       ])
       && data.keys().hasOnly([
-        'ownerId', 'folderId', 'english', 'ipa', 'vietnamese', 'example',
+        'ownerId', 'folderId', 'language', 'english', 'ipa', 'vietnamese', 'example',
         'exampleVi', 'synonyms', 'imageUrl', 'mastered', 'createdAt', 'updatedAt'
       ])
       && isValidId(data.ownerId)
       && data.ownerId == request.auth.uid
       && isValidId(data.folderId)
+      && (!('language' in data) || data.language in ['en', 'zh'])
       && data.english is string && data.english.size() <= 150
       && data.ipa is string && data.ipa.size() <= 150
       && data.vietnamese is string && data.vietnamese.size() <= 300
@@ -148,7 +152,7 @@ service cloud.firestore {
             'totalCorrectAnswers', 'updatedAt'
           ]) ||
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'accent', 'soundMuted', 'updatedAt'
+            'accent', 'zhAccent', 'learningLang', 'soundMuted', 'updatedAt'
           ]) ||
           incoming().diff(existing()).affectedKeys().hasOnly([
             'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds', 'updatedAt'
@@ -156,8 +160,8 @@ service cloud.firestore {
           incoming().diff(existing()).affectedKeys().hasOnly([
             'studentName', 'xp', 'dailyXp', 'todayDate', 'streak', 'lastActiveDate',
             'totalWordsAdded', 'totalFlashcardsCompleted', 'totalQuizzesCompleted',
-            'totalCorrectAnswers', 'accent', 'soundMuted', 'reminderEnabled',
-            'reminderEmail', 'reminderTime', 'reminderFolderIds', 'updatedAt'
+            'totalCorrectAnswers', 'accent', 'zhAccent', 'learningLang', 'soundMuted',
+            'reminderEnabled', 'reminderEmail', 'reminderTime', 'reminderFolderIds', 'updatedAt'
           ])
         );
 
@@ -183,7 +187,7 @@ service cloud.firestore {
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'description', 'color', 'updatedAt'
+            'name', 'description', 'color', 'language', 'updatedAt'
           ]);
 
         allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(folderId);
@@ -211,7 +215,7 @@ service cloud.firestore {
           && (
             incoming().diff(existing()).affectedKeys().hasOnly([
               'english', 'ipa', 'vietnamese', 'example', 'exampleVi',
-              'synonyms', 'imageUrl', 'mastered', 'folderId', 'updatedAt'
+              'synonyms', 'imageUrl', 'mastered', 'folderId', 'language', 'updatedAt'
             ])
           )
           && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId));

@@ -16,18 +16,20 @@ import {
   X,
 } from 'lucide-react';
 import { FOLDER_COLOR_STYLES, IPA_QUICK_SYMBOLS } from '../data/seedData';
-import type { TopicFolder, VocabWord } from '../types/vocab';
+import type { SpeechAccent, StudyLanguage, TopicFolder, VocabWord } from '../types/vocab';
 import { speakText } from '../utils/audio';
 import { lookupEnglishWord } from '../utils/dictionary';
 import { compressImageToDataUrl } from '../utils/imageUtils';
+import { lookupChineseWordHelper, PINYIN_TONE_SYMBOLS } from '../utils/pinyin';
 import { ImagePickerModal } from './ImagePickerModal';
 
 interface VocabTableProps {
+  studyLanguage: StudyLanguage;
   folders: TopicFolder[];
   activeFolderId: string;
   words: VocabWord[];
   selectedIds: string[];
-  accent: 'en-US' | 'en-GB';
+  speechAccent: SpeechAccent;
   onToggleSelect: (wordId: string) => void;
   onSelectAllVisible: (visibleIds: string[]) => void;
   onClearSelection: () => void;
@@ -39,11 +41,12 @@ interface VocabTableProps {
 }
 
 export const VocabTable: React.FC<VocabTableProps> = ({
+  studyLanguage,
   folders,
   activeFolderId,
   words,
   selectedIds,
-  accent,
+  speechAccent,
   onToggleSelect,
   onSelectAllVisible,
   onClearSelection,
@@ -54,12 +57,13 @@ export const VocabTable: React.FC<VocabTableProps> = ({
   onLaunchQuiz,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeIpaWordId, setActiveIpaWordId] = useState<string | null>(null);
+  const [activePhoneticWordId, setActivePhoneticWordId] = useState<string | null>(null);
   const [synonymDrafts, setSynonymDrafts] = useState<Record<string, string>>({});
   const [lookupLoadingId, setLookupLoadingId] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [imagePickerWordId, setImagePickerWordId] = useState<string | null>(null);
 
+  const isZh = studyLanguage === 'zh';
   const activeFolder = folders.find((f) => f.id === activeFolderId);
   const folderMap = new Map(folders.map((f) => [f.id, f]));
 
@@ -70,6 +74,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
     if (!q) return true;
     return (
       w.english.toLowerCase().includes(q) ||
+      w.ipa.toLowerCase().includes(q) ||
       w.vietnamese.toLowerCase().includes(q) ||
       w.example.toLowerCase().includes(q) ||
       w.synonyms.some((s) => s.toLowerCase().includes(q))
@@ -92,10 +97,31 @@ export const VocabTable: React.FC<VocabTableProps> = ({
 
   const handleAutoLookup = async (word: VocabWord) => {
     const term = word.english.trim();
-    if (!term) {
-      showToast('Enter an English word first before looking up IPA.');
+    if (!term && !word.ipa.trim()) {
+      showToast(
+        isZh
+          ? 'Nhập chữ Hán hoặc Pinyin dạng số (VD: ni3 hao3) trước nhé.'
+          : 'Enter an English word first before looking up IPA.'
+      );
       return;
     }
+
+    if (isZh) {
+      const zhRes = lookupChineseWordHelper(term, word.ipa);
+      if (!zhRes) {
+        showToast('Hãy nhập Pinyin dạng số (VD: ni3 hao3) hoặc dùng thanh dấu thanh Pinyin bên dưới.');
+        return;
+      }
+      const updates: Partial<VocabWord> = {};
+      if (zhRes.pinyin) updates.ipa = zhRes.pinyin;
+      if (word.synonyms.length === 0 && zhRes.synonyms && zhRes.synonyms.length > 0) {
+        updates.synonyms = zhRes.synonyms.slice(0, 3);
+      }
+      onUpdateWord(word.id, updates);
+      showToast(`Đã cập nhật Pinyin${updates.synonyms ? ' & từ đồng nghĩa' : ''} cho "${term || zhRes.pinyin}".`);
+      return;
+    }
+
     setLookupLoadingId(word.id);
     try {
       const result = await lookupEnglishWord(term);
@@ -120,9 +146,9 @@ export const VocabTable: React.FC<VocabTableProps> = ({
     }
   };
 
-  const handleInsertIpaSymbol = (word: VocabWord, symbol: string) => {
+  const handleInsertPhoneticSymbol = (word: VocabWord, symbol: string) => {
     const current = word.ipa || '';
-    const next = current ? `${current}${symbol}` : `/${symbol}/`;
+    const next = isZh ? `${current}${symbol}` : current ? `${current}${symbol}` : `/${symbol}/`;
     onUpdateWord(word.id, { ipa: next });
   };
 
@@ -166,6 +192,8 @@ export const VocabTable: React.FC<VocabTableProps> = ({
     ? FOLDER_COLOR_STYLES[activeFolder.color] || FOLDER_COLOR_STYLES.lavender
     : null;
 
+  const quickSymbols = isZh ? PINYIN_TONE_SYMBOLS : IPA_QUICK_SYMBOLS;
+
   return (
     <section className="flex-1 min-w-0 space-y-4">
       {/* Top Folder Header & Search */}
@@ -179,12 +207,18 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                 <Layers className="w-4 h-4 text-[#6F5C96] shrink-0" />
               )}
               <h1 className="text-xl sm:text-2xl font-bold text-[#2B2438] truncate">
-                {activeFolder ? activeFolder.name : 'All Topic Folders'}
+                {activeFolder
+                  ? activeFolder.name
+                  : isZh
+                  ? 'Tất cả thư mục Tiếng Trung'
+                  : 'All Topic Folders'}
               </h1>
             </div>
             <p className="text-sm text-[#5E556E] mt-1">
               {activeFolder?.description ||
-                'Review and select words across all your personal vocabulary folders.'}
+                (isZh
+                  ? 'Xem và chọn từ vựng Tiếng Trung (汉字 · Pinyin) trên tất cả các chủ đề.'
+                  : 'Review and select words across all your personal vocabulary folders.')}
             </p>
           </div>
 
@@ -195,7 +229,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search words..."
+                placeholder={isZh ? 'Tìm chữ Hán, Pinyin, nghĩa...' : 'Search words...'}
                 aria-label="Search vocabulary words"
                 className="w-48 sm:w-56 pl-9 pr-3 py-2 rounded-xl bg-white/90 border border-[#867C96]/20 text-sm text-[#2B2438] placeholder:text-[#867C96]"
               />
@@ -211,7 +245,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#6F5C96] text-white text-sm font-bold hover:bg-[#5E4C84] transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>Add Word</span>
+                <span>{isZh ? 'Thêm từ mới' : 'Add Word'}</span>
               </button>
             )}
           </div>
@@ -295,7 +329,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
           <p className="text-sm text-[#5E556E]">
             {searchTerm
               ? 'Try clearing your search filter or check another topic folder.'
-              : 'Click "+ Add Word" above to add your first English word, IPA, meaning, example, and image.'}
+              : 'Click "+ Add Word" above to add your first vocabulary entry.'}
           </p>
           {!searchTerm && targetAddFolderId && (
             <button
@@ -304,7 +338,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#6F5C96] text-white text-sm font-bold hover:bg-[#5E4C84] cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Add First Word</span>
+              <span>{isZh ? 'Thêm từ đầu tiên' : 'Add First Word'}</span>
             </button>
           )}
         </div>
@@ -317,18 +351,26 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                 <thead>
                   <tr className="bg-gradient-to-r from-[#F3F0FC] via-[#FFF2F0] to-[#EEF9F8] border-b border-[#867C96]/15 text-xs font-bold text-[#3F3163]">
                     <th className="py-3.5 pl-4 pr-2 w-[68px] whitespace-nowrap">No.</th>
-                    <th className="py-3.5 px-2.5 min-w-[155px]">English Word</th>
-                    <th className="py-3.5 px-2.5 min-w-[170px]">IPA</th>
+                    <th className="py-3.5 px-2.5 min-w-[155px]">
+                      {isZh ? 'Tiếng Trung (汉字)' : 'English Word'}
+                    </th>
+                    <th className="py-3.5 px-2.5 min-w-[170px]">
+                      {isZh ? 'Pinyin (Phiên âm)' : 'IPA'}
+                    </th>
                     <th className="py-3.5 px-2.5 min-w-[180px]">Vietnamese Meaning</th>
-                    <th className="py-3.5 px-2.5 min-w-[240px]">Example Sentence</th>
-                    <th className="py-3.5 px-2.5 min-w-[165px]">English Synonyms</th>
+                    <th className="py-3.5 px-2.5 min-w-[240px]">
+                      {isZh ? 'Câu ví dụ (中文)' : 'Example Sentence'}
+                    </th>
+                    <th className="py-3.5 px-2.5 min-w-[165px]">
+                      {isZh ? 'Từ đồng nghĩa (中文)' : 'English Synonyms'}
+                    </th>
                     <th className="py-3.5 pl-2.5 pr-4 min-w-[140px]">Vivid Image</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#867C96]/12 text-sm">
                   {visibleWords.map((word, index) => {
                     const isSelected = selectedIds.includes(word.id);
-                    const isIpaOpen = activeIpaWordId === word.id;
+                    const isPhoneticOpen = activePhoneticWordId === word.id;
                     const folderName = folderMap.get(word.folderId)?.name;
 
                     return (
@@ -354,7 +396,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                           </div>
                         </td>
 
-                        {/* 2. English Word + Audio */}
+                        {/* 2. Target Word (English or Hanzi) + Audio */}
                         <td className="py-3 px-2.5">
                           <div className="flex items-start gap-1.5">
                             <input
@@ -363,13 +405,15 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                               onChange={(e) =>
                                 onUpdateWord(word.id, { english: e.target.value })
                               }
-                              placeholder="English word"
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-transparent hover:border-[#D5CEF5] focus:border-[#7C5CBF] focus:bg-white font-bold text-[#2B2438] text-sm"
+                              placeholder={isZh ? '汉字 (VD: 你好)' : 'English word'}
+                              className={`w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-transparent hover:border-[#D5CEF5] focus:border-[#7C5CBF] focus:bg-white font-bold text-[#2B2438] ${
+                                isZh ? 'text-base' : 'text-sm'
+                              }`}
                             />
                             <button
                               type="button"
-                              onClick={() => speakText(word.english, accent)}
-                              title={`Pronounce "${word.english}" (${accent})`}
+                              onClick={() => speakText(word.english, speechAccent)}
+                              title={`Pronounce "${word.english}" (${speechAccent})`}
                               aria-label={`Pronounce ${word.english}`}
                               className="p-2 rounded-lg bg-[#F3F0FC] text-[#4D3B73] hover:bg-[#E6E6FA] transition-colors shrink-0 cursor-pointer"
                             >
@@ -383,25 +427,29 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                           )}
                         </td>
 
-                        {/* 3. IPA + Auto-Lookup + Quick-Insert Bar */}
+                        {/* 3. IPA / Pinyin + Auto-Lookup + Quick-Insert Bar */}
                         <td className="py-3 px-2.5">
                           <div className="flex items-center gap-1">
                             <input
                               type="text"
                               value={word.ipa}
-                              onFocus={() => setActiveIpaWordId(word.id)}
+                              onFocus={() => setActivePhoneticWordId(word.id)}
                               onChange={(e) =>
                                 onUpdateWord(word.id, { ipa: e.target.value })
                               }
-                              placeholder="/aɪ.piː.eɪ/"
+                              placeholder={isZh ? 'nǐ hǎo (hoặc ni3 hao3)' : '/aɪ.piː.eɪ/'}
                               className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-transparent hover:border-[#D5CEF5] focus:border-[#7C5CBF] focus:bg-white font-ipa text-xs text-[#4D3B73]"
                             />
                             <button
                               type="button"
                               onClick={() => handleAutoLookup(word)}
                               disabled={lookupLoadingId === word.id}
-                              title="Auto-lookup IPA & synonyms via dictionaryapi.dev"
-                              aria-label={`Auto lookup IPA for ${word.english}`}
+                              title={
+                                isZh
+                                  ? 'Tự chuyển ni3 hao3 → nǐ hǎo hoặc tra từ thông dụng'
+                                  : 'Auto-lookup IPA & synonyms via dictionaryapi.dev'
+                              }
+                              aria-label={`Auto lookup phonetic for ${word.english}`}
                               className="p-1.5 rounded-lg bg-[#EEF9F8] text-[#1F4F4B] border border-[#BFE3E0] hover:bg-[#E0F2F1] transition-colors shrink-0 cursor-pointer"
                             >
                               {lookupLoadingId === word.id ? (
@@ -416,21 +464,27 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                             <button
                               type="button"
                               onClick={() =>
-                                setActiveIpaWordId(isIpaOpen ? null : word.id)
+                                setActivePhoneticWordId(isPhoneticOpen ? null : word.id)
                               }
                               className="text-[11px] font-semibold text-[#6F5C96] hover:underline cursor-pointer"
                             >
-                              {isIpaOpen ? 'Hide IPA bar' : 'IPA symbols'}
+                              {isPhoneticOpen
+                                ? isZh
+                                  ? 'Ẩn thanh dấu'
+                                  : 'Hide IPA bar'
+                                : isZh
+                                ? 'Thanh dấu Pinyin'
+                                : 'IPA symbols'}
                             </button>
                           </div>
 
-                          {isIpaOpen && (
+                          {isPhoneticOpen && (
                             <div className="mt-1.5 p-1.5 rounded-xl bg-[#FFFDF9] border border-[#D5CEF5] shadow-sm flex flex-wrap gap-1 max-w-[215px]">
-                              {IPA_QUICK_SYMBOLS.map((sym) => (
+                              {quickSymbols.map((sym) => (
                                 <button
                                   key={sym}
                                   type="button"
-                                  onClick={() => handleInsertIpaSymbol(word, sym)}
+                                  onClick={() => handleInsertPhoneticSymbol(word, sym)}
                                   className="px-1.5 py-0.5 rounded bg-[#F3F0FC] hover:bg-[#E6E6FA] font-ipa text-[11px] text-[#3F3163] cursor-pointer"
                                 >
                                   {sym}
@@ -462,12 +516,14 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                               onChange={(e) =>
                                 onUpdateWord(word.id, { example: e.target.value })
                               }
-                              placeholder="English example sentence..."
+                              placeholder={
+                                isZh ? 'Câu ví dụ tiếng Trung...' : 'English example sentence...'
+                              }
                               className="w-full px-2.5 py-1.5 rounded-lg bg-white/80 border border-transparent hover:border-[#D5CEF5] focus:border-[#7C5CBF] focus:bg-white text-xs text-[#2B2438] resize-none leading-relaxed"
                             />
                             <button
                               type="button"
-                              onClick={() => speakText(word.example, accent)}
+                              onClick={() => speakText(word.example, speechAccent)}
                               title="Listen to example sentence"
                               aria-label="Pronounce example sentence"
                               className="p-2 rounded-lg bg-[#FFF2F0] text-[#632F2D] hover:bg-[#FFE4E1] transition-colors shrink-0 cursor-pointer"
@@ -486,7 +542,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                           />
                         </td>
 
-                        {/* 6. English Synonyms (Optional Tag Input) */}
+                        {/* 6. Synonyms (Optional Tag Input) */}
                         <td className="py-3 px-2.5">
                           <div className="flex flex-wrap gap-1 mb-1.5">
                             {word.synonyms.map((syn) => (
@@ -531,7 +587,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                           />
                         </td>
 
-                        {/* 7. Vivid Image (Optional: Ctrl+V Paste + Picker Modal) + Row Delete */}
+                        {/* 7. Vivid Image (Ctrl+V Paste + Picker Modal) + Row Delete */}
                         <td className="py-3 pl-2.5 pr-4">
                           <div className="flex items-start gap-2">
                             <div
@@ -619,7 +675,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => speakText(word.english, accent)}
+                        onClick={() => speakText(word.english, speechAccent)}
                         className="p-2 rounded-xl bg-[#F3F0FC] text-[#3F3163]"
                         aria-label="Pronounce word"
                       >
@@ -629,7 +685,7 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                         type="button"
                         onClick={() => handleAutoLookup(word)}
                         className="p-2 rounded-xl bg-[#EEF9F8] text-[#1F4F4B]"
-                        aria-label="Lookup IPA"
+                        aria-label="Lookup phonetic"
                       >
                         <Wand2 className="w-4 h-4" />
                       </button>
@@ -649,14 +705,14 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                       type="text"
                       value={word.english}
                       onChange={(e) => onUpdateWord(word.id, { english: e.target.value })}
-                      placeholder="English Word"
+                      placeholder={isZh ? '汉字 (Tiếng Trung)' : 'English Word'}
                       className="px-3 py-2 rounded-xl bg-white border border-[#867C96]/20 font-bold text-[#2B2438] text-sm"
                     />
                     <input
                       type="text"
                       value={word.ipa}
                       onChange={(e) => onUpdateWord(word.id, { ipa: e.target.value })}
-                      placeholder="IPA /.../"
+                      placeholder={isZh ? 'Pinyin (VD: nǐ hǎo)' : 'IPA /.../'}
                       className="px-3 py-2 rounded-xl bg-white border border-[#867C96]/20 font-ipa text-xs text-[#4D3B73]"
                     />
                   </div>
@@ -675,12 +731,12 @@ export const VocabTable: React.FC<VocabTableProps> = ({
                         type="text"
                         value={word.example}
                         onChange={(e) => onUpdateWord(word.id, { example: e.target.value })}
-                        placeholder="Example Sentence"
+                        placeholder={isZh ? 'Câu ví dụ tiếng Trung' : 'Example Sentence'}
                         className="flex-1 px-3 py-2 rounded-xl bg-white border border-[#867C96]/20 text-xs text-[#2B2438]"
                       />
                       <button
                         type="button"
-                        onClick={() => speakText(word.example, accent)}
+                        onClick={() => speakText(word.example, speechAccent)}
                         className="p-2 rounded-xl bg-[#FFF2F0] text-[#632F2D]"
                         aria-label="Listen to example"
                       >

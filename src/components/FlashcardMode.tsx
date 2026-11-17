@@ -8,12 +8,13 @@ import {
   Sparkles,
   Volume2,
 } from 'lucide-react';
-import type { VocabWord } from '../types/vocab';
+import type { SpeechAccent, StudyLanguage, VocabWord } from '../types/vocab';
 import { playFeedbackSound, speakText } from '../utils/audio';
 
 interface FlashcardModeProps {
   words: VocabWord[];
-  accent: 'en-US' | 'en-GB';
+  studyLanguage: StudyLanguage;
+  speechAccent: SpeechAccent;
   soundMuted: boolean;
   onMarkMastered: (wordId: string, mastered: boolean) => void;
   onCardReviewed: (xpAmount: number) => void;
@@ -24,7 +25,8 @@ interface FlashcardModeProps {
 
 export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   words,
-  accent,
+  studyLanguage,
+  speechAccent,
   soundMuted,
   onMarkMastered,
   onCardReviewed,
@@ -40,6 +42,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   const [isCompleted, setIsCompleted] = useState(false);
 
   const currentCard = deck[currentIndex];
+  const isZh = (currentCard?.language || studyLanguage) === 'zh';
 
   const goNext = useCallback(() => {
     setIsFlipped(false);
@@ -166,6 +169,13 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   }
 
   const progressPct = Math.round(((currentIndex + 1) / deck.length) * 100);
+  const accentLabel = isZh
+    ? speechAccent === 'zh-TW'
+      ? 'Đài Loan'
+      : 'Phổ thông'
+    : speechAccent === 'en-GB'
+    ? 'UK'
+    : 'US';
 
   return (
     <div className="max-w-3xl mx-auto py-6 px-4 space-y-5">
@@ -216,10 +226,10 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
             isFlipped ? 'rotate-y-180' : ''
           }`}
         >
-          {/* Front Side: English Word, IPA, Audio, Vivid Image */}
+          {/* Front Side */}
           <div className="absolute inset-0 backface-hidden glass-card rounded-2xl p-6 sm:p-10 flex flex-col items-center justify-between text-center">
             <div className="w-full flex items-center justify-between text-xs font-bold text-[#867C96]">
-              <span>Front · English Word</span>
+              <span>{isZh ? 'Front · Tiếng Trung (汉字)' : 'Front · English Word'}</span>
               <span>Click or press Space to flip</span>
             </div>
 
@@ -236,7 +246,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
               )}
 
               <div>
-                <h2 className="text-3xl sm:text-4xl font-bold text-[#2B2438] tracking-tight">
+                <h2 className="text-3xl sm:text-5xl font-bold text-[#2B2438] tracking-tight">
                   {currentCard.english || '(Untitled word)'}
                 </h2>
                 {currentCard.ipa && (
@@ -250,12 +260,12 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  speakText(currentCard.english, accent);
+                  speakText(currentCard.english, speechAccent);
                 }}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#F3F0FC] text-[#3F3163] hover:bg-[#E6E6FA] text-xs font-bold transition-colors cursor-pointer"
               >
                 <Volume2 className="w-4 h-4" />
-                <span>Listen ({accent === 'en-US' ? 'US' : 'UK'})</span>
+                <span>Listen ({accentLabel})</span>
               </button>
             </div>
 
@@ -264,11 +274,13 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
             </p>
           </div>
 
-          {/* Back Side: Vietnamese Meaning, Example, Synonyms */}
+          {/* Back Side */}
           <div className="absolute inset-0 backface-hidden rotate-y-180 glass-card rounded-2xl p-6 sm:p-10 flex flex-col justify-between bg-gradient-to-br from-[#FFFDF9] via-[#FAF7FD] to-[#EEF9F8]">
             <div className="w-full flex items-center justify-between text-xs font-bold text-[#867C96]">
               <span>Back · Meaning & Context</span>
-              <span className="font-ipa text-[#6F5C96]">{currentCard.english}</span>
+              <span className="font-ipa text-[#6F5C96]">
+                {currentCard.english} {currentCard.ipa ? `· ${currentCard.ipa}` : ''}
+              </span>
             </div>
 
             <div className="my-auto space-y-5 text-center">
@@ -289,7 +301,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        speakText(currentCard.example, accent);
+                        speakText(currentCard.example, speechAccent);
                       }}
                       className="p-2 rounded-lg bg-[#FFF2F0] text-[#632F2D] hover:bg-[#FFE4E1] shrink-0 cursor-pointer"
                       aria-label="Pronounce example sentence"
@@ -298,9 +310,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
                     </button>
                   </div>
                   {currentCard.exampleVi && (
-                    <p className="text-xs sm:text-sm text-[#5E556E]">
-                      {currentCard.exampleVi}
-                    </p>
+                    <p className="text-xs sm:text-sm text-[#5E556E]">{currentCard.exampleVi}</p>
                   )}
                 </div>
               )}
@@ -320,9 +330,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
               )}
             </div>
 
-            <p className="text-center text-xs font-semibold text-[#867C96]">
-              Tap card to flip back
-            </p>
+            <p className="text-center text-xs font-semibold text-[#867C96]">Tap card to flip back</p>
           </div>
         </div>
       </div>
