@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import type { User } from 'firebase/auth';
 import {
   BellRing,
@@ -34,7 +34,7 @@ interface HeaderProps {
   reminderEnabled: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export const Header: React.FC<HeaderProps> = memo(({
   activeView,
   onNavigateNotebook,
   onOpenLeaderboard,
@@ -267,4 +267,5 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
     </header>
   );
-};
+});
+Header.displayName = 'Header';

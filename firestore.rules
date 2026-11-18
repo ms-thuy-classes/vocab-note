@@ -90,13 +90,22 @@ service cloud.firestore {
 
     function isValidFolder(data) {
       return data.keys().hasAll(['ownerId', 'name', 'description', 'color', 'createdAt', 'updatedAt'])
-      && data.keys().hasOnly(['ownerId', 'name', 'description', 'color', 'language', 'createdAt', 'updatedAt'])
+      && data.keys().hasOnly([
+        'ownerId', 'name', 'description', 'color', 'language', 'isParent', 'parentId',
+        'createdAt', 'updatedAt'
+      ])
       && isValidId(data.ownerId)
       && data.ownerId == request.auth.uid
       && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
       && data.description is string && data.description.size() <= 300
       && data.color in ['lavender', 'blush', 'mint', 'cream', 'sky', 'peach']
       && (!('language' in data) || data.language in ['en', 'zh'])
+      && (!('isParent' in data) || data.isParent is bool)
+      && (
+        !('parentId' in data) ||
+        (data.parentId is string && data.parentId.size() <= 128 && (data.parentId.size() == 0 || isValidId(data.parentId)))
+      )
+      && (!('isParent' in data) || data.isParent == false || !('parentId' in data) || data.parentId == '')
       && data.createdAt is timestamp
       && data.updatedAt is timestamp;
     }
@@ -187,7 +196,7 @@ service cloud.firestore {
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly([
-            'name', 'description', 'color', 'language', 'updatedAt'
+            'name', 'description', 'color', 'language', 'isParent', 'parentId', 'updatedAt'
           ]);
 
         allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(folderId);
@@ -203,7 +212,11 @@ service cloud.firestore {
           && isValidWord(incoming())
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time
-          && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId));
+          && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId))
+          && (
+            !('isParent' in getAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId)).data) ||
+            getAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId)).data.isParent == false
+          );
 
         allow update: if isVerifiedOwner(userId)
           && isValidId(userId)
@@ -218,7 +231,11 @@ service cloud.firestore {
               'synonyms', 'imageUrl', 'mastered', 'folderId', 'language', 'updatedAt'
             ])
           )
-          && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId));
+          && existsAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId))
+          && (
+            !('isParent' in getAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId)).data) ||
+            getAfter(/databases/$(database)/documents/users/$(userId)/folders/$(incoming().folderId)).data.isParent == false
+          );
 
         allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(wordId);
       }

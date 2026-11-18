@@ -133,12 +133,20 @@ export function buildUserProfileDoc(
 }
 
 export function buildFolderDoc(uid: string, folder: TopicFolder, includeCreatedAt: boolean) {
+  const isParent = Boolean(folder.isParent);
+  const parentId = isParent
+    ? ''
+    : folder.parentId
+    ? sanitizeId(folder.parentId, 'folder')
+    : '';
   const base: Record<string, unknown> = {
     ownerId: sanitizeId(uid, 'user'),
     name: clampStr(folder.name.trim() || 'Untitled Folder', 100, 'Untitled Folder'),
     description: clampStr(folder.description || '', 300),
     color: sanitizeColor(folder.color),
     language: sanitizeLanguage(folder.language),
+    isParent,
+    parentId,
     updatedAt: serverTimestamp(),
   };
   if (includeCreatedAt) {
@@ -375,6 +383,8 @@ export function subscribeToCloudUserData(
           description: typeof d.description === 'string' ? d.description : '',
           color: sanitizeColor(d.color),
           language: sanitizeLanguage(d.language),
+          isParent: Boolean(d.isParent),
+          parentId: typeof d.parentId === 'string' && d.parentId ? d.parentId : undefined,
           createdAt: ts,
         };
       });
@@ -444,7 +454,7 @@ export async function createCloudFolder(uid: string, folder: TopicFolder): Promi
 export async function updateCloudFolder(
   uid: string,
   folderId: string,
-  updates: Partial<Pick<TopicFolder, 'name' | 'description' | 'color'>>
+  updates: Partial<Pick<TopicFolder, 'name' | 'description' | 'color' | 'parentId' | 'isParent'>>
 ): Promise<void> {
   const safeId = sanitizeId(folderId, 'folder');
   const path = `users/${uid}/folders/${safeId}`;
@@ -458,6 +468,12 @@ export async function updateCloudFolder(
   if (updates.color !== undefined) {
     payload.color = sanitizeColor(updates.color);
   }
+  if (updates.isParent !== undefined) {
+    payload.isParent = Boolean(updates.isParent);
+  }
+  if (updates.parentId !== undefined) {
+    payload.parentId = updates.parentId ? sanitizeId(updates.parentId, 'folder') : '';
+  }
   try {
     await updateDoc(doc(db, 'users', uid, 'folders', safeId), payload);
   } catch (error) {
@@ -467,20 +483,49 @@ export async function updateCloudFolder(
 
 export async function deleteCloudFolderAndWords(
   uid: string,
-  folderId: string,
-  wordIdsInFolder: string[]
+  folderIdsToDelete: string[],
+  wordIdsInFolders: string[]
 ): Promise<void> {
-  const safeFolderId = sanitizeId(folderId, 'folder');
-  const path = `users/${uid}/folders/${safeFolderId}`;
+  const safeFolderIds = folderIdsToDelete.map((fid) => sanitizeId(fid, 'folder'));
+  const path = `users/${uid}/folders/${safeFolderIds[0] || 'folder'}`;
   try {
     const batch = writeBatch(db);
-    for (const wid of wordIdsInFolder.slice(0, 450)) {
+    for (const wid of wordIdsInFolders.slice(0, 420)) {
       batch.delete(doc(db, 'users', uid, 'words', sanitizeId(wid, 'word')));
     }
-    batch.delete(doc(db, 'users', uid, 'folders', safeFolderId));
+    for (const fid of safeFolderIds.slice(0, 50)) {
+      batch.delete(doc(db, 'users', uid, 'folders', fid));
+    }
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function upgradeFolderHierarchyInCloud(
+  uid: string,
+  newParentFolders: TopicFolder[],
+  subfolderParentPatches: { folderId: string; parentId: string }[]
+): Promise<void> {
+  if (newParentFolders.length === 0 && subfolderParentPatches.length === 0) return;
+  const path = `users/${uid}/folders`;
+  try {
+    const batch = writeBatch(db);
+    for (const pf of newParentFolders) {
+      const safeId = sanitizeId(pf.id, 'folder');
+      batch.set(doc(db, 'users', uid, 'folders', safeId), buildFolderDoc(uid, pf, true));
+    }
+    for (const patch of subfolderParentPatches) {
+      const safeId = sanitizeId(patch.folderId, 'folder');
+      batch.update(doc(db, 'users', uid, 'folders', safeId), {
+        isParent: false,
+        parentId: sanitizeId(patch.parentId, 'folder'),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 

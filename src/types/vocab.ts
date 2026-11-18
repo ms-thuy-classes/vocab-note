@@ -11,6 +11,8 @@ export interface TopicFolder {
   description: string;
   color: FolderColor;
   language?: StudyLanguage;
+  isParent?: boolean;
+  parentId?: string;
   createdAt: number;
 }
 

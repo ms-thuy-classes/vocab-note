@@ -171,6 +171,15 @@
           "enum": ["en", "zh"],
           "description": "Study language for this folder (en or zh)."
         },
+        "isParent": {
+          "type": "boolean",
+          "description": "True if this is a top-level parent folder containing only subfolders (no direct words)."
+        },
+        "parentId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "ID of the parent TopicFolder when this folder is a subfolder."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",

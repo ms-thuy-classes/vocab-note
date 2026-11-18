@@ -3,18 +3,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import { Cloud, Languages, LogIn, X } from 'lucide-react';
-import { AuthModal } from './components/AuthModal';
-import { BackupModal, type VocabBackupPayload } from './components/BackupModal';
-import { EmailReminderModal } from './components/EmailReminderModal';
-import { FlashcardMode } from './components/FlashcardMode';
+import type { VocabBackupPayload } from './components/BackupModal';
 import { FolderSidebar } from './components/FolderSidebar';
 import { Header, type ActiveView } from './components/Header';
-import { LeaderboardModal } from './components/LeaderboardModal';
-import { SmartQuizMode } from './components/SmartQuizMode';
 import { VocabTable } from './components/VocabTable';
+
+const AuthModal = lazy(() =>
+  import('./components/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
+const BackupModal = lazy(() =>
+  import('./components/BackupModal').then((m) => ({ default: m.BackupModal }))
+);
+const EmailReminderModal = lazy(() =>
+  import('./components/EmailReminderModal').then((m) => ({ default: m.EmailReminderModal }))
+);
+const FlashcardMode = lazy(() =>
+  import('./components/FlashcardMode').then((m) => ({ default: m.FlashcardMode }))
+);
+const LeaderboardModal = lazy(() =>
+  import('./components/LeaderboardModal').then((m) => ({ default: m.LeaderboardModal }))
+);
+const SmartQuizMode = lazy(() =>
+  import('./components/SmartQuizMode').then((m) => ({ default: m.SmartQuizMode }))
+);
 import {
   CHINESE_INITIAL_FOLDERS,
   CHINESE_INITIAL_WORDS,
@@ -52,6 +66,7 @@ import {
   updateCloudUserPrefs,
   updateCloudUserProgress,
   updateCloudWord,
+  upgradeFolderHierarchyInCloud,
 } from './utils/cloudSync';
 
 const STORAGE_KEYS = {
@@ -86,6 +101,86 @@ function readStorage<T>(key: string, fallback: T): T {
   }
 }
 
+const STARTER_SUBFOLDER_PARENT_MAP: Record<string, string> = {
+  'folder-ielts-env': 'parent-en-academic',
+  'folder-business': 'parent-en-academic',
+  'folder-daily-conv': 'parent-en-life',
+  'folder-unit1-family': 'parent-en-life',
+  'folder-zh-hsk1': 'parent-zh-hsk',
+  'folder-zh-work': 'parent-zh-hsk',
+  'folder-zh-family': 'parent-zh-life',
+  'folder-zh-travel': 'parent-zh-life',
+};
+
+const ALL_STARTER_PARENTS: TopicFolder[] = [
+  ...INITIAL_FOLDERS,
+  ...CHINESE_INITIAL_FOLDERS,
+].filter((f) => f.isParent);
+
+function computeHierarchyUpgrade(foldersList: TopicFolder[]): {
+  nextFolders: TopicFolder[];
+  newParents: TopicFolder[];
+  patches: { folderId: string; parentId: string }[];
+} {
+  const existingIds = new Set(foldersList.map((f) => f.id));
+  const hasAnyParentInLang: Record<StudyLanguage, boolean> = {
+    en: foldersList.some((f) => (f.language || 'en') === 'en' && Boolean(f.isParent)),
+    zh: foldersList.some((f) => (f.language || 'en') === 'zh' && Boolean(f.isParent)),
+  };
+
+  const newParents: TopicFolder[] = [];
+  for (const parentTpl of ALL_STARTER_PARENTS) {
+    const lang = parentTpl.language || 'en';
+    if (hasAnyParentInLang[lang] || existingIds.has(parentTpl.id)) continue;
+    const hasStarterChild = foldersList.some(
+      (f) => STARTER_SUBFOLDER_PARENT_MAP[f.id] === parentTpl.id && !f.isParent && !f.parentId
+    );
+    if (hasStarterChild) {
+      newParents.push(parentTpl);
+      existingIds.add(parentTpl.id);
+    }
+  }
+
+  const patches: { folderId: string; parentId: string }[] = [];
+  const updatedExisting = foldersList.map((f) => {
+    const expectedParent = STARTER_SUBFOLDER_PARENT_MAP[f.id];
+    const lang = f.language || 'en';
+    if (
+      expectedParent &&
+      !f.isParent &&
+      !f.parentId &&
+      !hasAnyParentInLang[lang] &&
+      existingIds.has(expectedParent)
+    ) {
+      patches.push({ folderId: f.id, parentId: expectedParent });
+      return { ...f, isParent: false, parentId: expectedParent };
+    }
+    return f;
+  });
+
+  if (newParents.length === 0 && patches.length === 0) {
+    return { nextFolders: foldersList, newParents: [], patches: [] };
+  }
+
+  return {
+    nextFolders: [...newParents, ...updatedExisting],
+    newParents,
+    patches,
+  };
+}
+
+function getDefaultFolderIdForLang(foldersList: TopicFolder[], lang: StudyLanguage): string {
+  const langFolders = foldersList.filter((f) => (f.language || 'en') === lang);
+  const firstParent = langFolders.find((f) => f.isParent);
+  if (firstParent) {
+    const firstChild = langFolders.find((f) => !f.isParent && f.parentId === firstParent.id);
+    if (firstChild) return firstChild.id;
+  }
+  const anySubfolder = langFolders.find((f) => !f.isParent);
+  if (anySubfolder) return anySubfolder.id;
+  return langFolders[0]?.id || 'all';
+}
+
 export default function App() {
   const [folders, setFolders] = useState<TopicFolder[]>(() => {
     const saved = readStorage<TopicFolder[]>(STORAGE_KEYS.folders, [
@@ -93,10 +188,10 @@ export default function App() {
       ...CHINESE_INITIAL_FOLDERS,
     ]);
     // Ensure Chinese starter folders exist for returning local users upgrading from v1
-    if (!saved.some((f) => f.language === 'zh')) {
-      return [...saved, ...CHINESE_INITIAL_FOLDERS];
-    }
-    return saved;
+    const withZh = saved.some((f) => f.language === 'zh')
+      ? saved
+      : [...saved, ...CHINESE_INITIAL_FOLDERS];
+    return computeHierarchyUpgrade(withZh).nextFolders;
   });
 
   const [words, setWords] = useState<VocabWord[]>(() => {
@@ -148,10 +243,9 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hideSyncBanner, setHideSyncBanner] = useState(false);
 
-  const [activeFolderId, setActiveFolderId] = useState<string>(() => {
-    const langFolders = folders.filter((f) => (f.language || 'en') === prefs.learningLang);
-    return langFolders[0]?.id || 'all';
-  });
+  const [activeFolderId, setActiveFolderId] = useState<string>(() =>
+    getDefaultFolderIdForLang(folders, prefs.learningLang)
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('notebook');
   const [studyWords, setStudyWords] = useState<VocabWord[]>([]);
@@ -167,23 +261,43 @@ export default function App() {
   const wordDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pendingWordPatchRef = useRef<Record<string, Partial<VocabWord>>>({});
   const seededZhCloudForUidRef = useRef<string | null>(null);
+  const migratedHierarchyForUidRef = useRef<string | null>(null);
 
-  // Persist to localStorage
+  // Debounced persistence to localStorage so typing/scrolling stays fast on mobile
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.folders, JSON.stringify(folders));
-    } catch {
-      // Storage quota guard
-    }
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEYS.folders, JSON.stringify(folders));
+      } catch {
+        // Storage quota guard
+      }
+    }, 250);
+    return () => clearTimeout(timer);
   }, [folders]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(words));
-    } catch {
-      // Storage quota guard
-    }
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(words));
+      } catch {
+        // Storage quota guard
+      }
+    }, 350);
+    return () => clearTimeout(timer);
   }, [words]);
+
+  useEffect(() => {
+    const flushLocal = () => {
+      try {
+        localStorage.setItem(STORAGE_KEYS.folders, JSON.stringify(latestLocalRef.current.folders));
+        localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(latestLocalRef.current.words));
+      } catch {
+        // Storage quota guard
+      }
+    };
+    window.addEventListener('pagehide', flushLocal);
+    return () => window.removeEventListener('pagehide', flushLocal);
+  }, []);
 
   useEffect(() => {
     try {
@@ -222,6 +336,7 @@ export default function App() {
       setCurrentUser(user);
       setSyncError(null);
       seededZhCloudForUidRef.current = null;
+      migratedHierarchyForUidRef.current = null;
 
       if (!user) {
         setIsSyncing(false);
@@ -271,6 +386,15 @@ export default function App() {
                 CHINESE_INITIAL_WORDS
               ).catch(() => {});
             }
+            // Upgrade flat starter folders into 2-level Parent -> Subfolder hierarchy once per account
+            const { newParents, patches } = computeHierarchyUpgrade(cloudFolders);
+            if (
+              (newParents.length > 0 || patches.length > 0) &&
+              migratedHierarchyForUidRef.current !== user.uid
+            ) {
+              migratedHierarchyForUidRef.current = user.uid;
+              upgradeFolderHierarchyInCloud(user.uid, newParents, patches).catch(() => {});
+            }
           },
           onWords: (cloudWords) => {
             setWords(cloudWords);
@@ -295,11 +419,13 @@ export default function App() {
   }, []);
 
   // Ensure activeFolderId always matches a folder in the current study language (or 'all')
-  const languageFolders = folders.filter(
-    (f) => (f.language || 'en') === prefs.learningLang
+  const languageFolders = useMemo(
+    () => folders.filter((f) => (f.language || 'en') === prefs.learningLang),
+    [folders, prefs.learningLang]
   );
-  const languageWords = words.filter(
-    (w) => (w.language || 'en') === prefs.learningLang
+  const languageWords = useMemo(
+    () => words.filter((w) => (w.language || 'en') === prefs.learningLang),
+    [words, prefs.learningLang]
   );
 
   useEffect(() => {
@@ -307,9 +433,9 @@ export default function App() {
       activeFolderId !== 'all' &&
       !languageFolders.some((f) => f.id === activeFolderId)
     ) {
-      setActiveFolderId(languageFolders[0]?.id || 'all');
+      setActiveFolderId(getDefaultFolderIdForLang(folders, prefs.learningLang));
     }
-  }, [activeFolderId, languageFolders]);
+  }, [activeFolderId, languageFolders, folders, prefs.learningLang]);
 
   const activeSpeechAccent: SpeechAccent =
     prefs.learningLang === 'zh' ? prefs.zhAccent : prefs.accent;
@@ -319,8 +445,7 @@ export default function App() {
     const nextPrefs: StoredPrefs = { ...prefs, learningLang: nextLang };
     setPrefs(nextPrefs);
     setSelectedIds([]);
-    const targetFolders = folders.filter((f) => (f.language || 'en') === nextLang);
-    setActiveFolderId(targetFolders[0]?.id || 'all');
+    setActiveFolderId(getDefaultFolderIdForLang(folders, nextLang));
     setActiveView('notebook');
 
     if (currentUser) {
@@ -393,171 +518,215 @@ export default function App() {
   );
 
   // Folder handlers
-  const handleCreateFolder = (name: string, description: string, color: FolderColor) => {
-    const newFolder: TopicFolder = {
-      id: sanitizeId(`folder-${prefs.learningLang}-${Date.now()}`, 'folder'),
-      name,
-      description,
-      color,
-      language: prefs.learningLang,
-      createdAt: Date.now(),
-    };
-    setFolders((prev) => [...prev, newFolder]);
-    setActiveFolderId(newFolder.id);
-    if (currentUser) {
-      createCloudFolder(currentUser.uid, newFolder).catch((err) =>
-        setSyncError(err instanceof Error ? err.message : String(err))
-      );
-    }
-  };
+  const handleCreateFolder = useCallback(
+    (
+      name: string,
+      description: string,
+      color: FolderColor,
+      options?: { isParent?: boolean; parentId?: string }
+    ) => {
+      const isParent = Boolean(options?.isParent);
+      const newFolder: TopicFolder = {
+        id: sanitizeId(`folder-${prefs.learningLang}-${Date.now()}`, 'folder'),
+        name,
+        description,
+        color,
+        language: prefs.learningLang,
+        isParent,
+        ...(isParent ? {} : { parentId: options?.parentId }),
+        createdAt: Date.now(),
+      };
+      setFolders((prev) => [...prev, newFolder]);
+      setActiveFolderId(newFolder.id);
+      if (currentUser) {
+        createCloudFolder(currentUser.uid, newFolder).catch((err) =>
+          setSyncError(err instanceof Error ? err.message : String(err))
+        );
+      }
+    },
+    [prefs.learningLang, currentUser]
+  );
 
-  const handleUpdateFolder = (
-    id: string,
-    updates: Partial<Pick<TopicFolder, 'name' | 'description' | 'color'>>
-  ) => {
-    setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
-    if (currentUser) {
-      updateCloudFolder(currentUser.uid, id, updates).catch((err) =>
-        setSyncError(err instanceof Error ? err.message : String(err))
-      );
-    }
-  };
+  const handleUpdateFolder = useCallback(
+    (
+      id: string,
+      updates: Partial<Pick<TopicFolder, 'name' | 'description' | 'color' | 'parentId'>>
+    ) => {
+      setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+      if (currentUser) {
+        updateCloudFolder(currentUser.uid, id, updates).catch((err) =>
+          setSyncError(err instanceof Error ? err.message : String(err))
+        );
+      }
+    },
+    [currentUser]
+  );
 
-  const handleDeleteFolder = (id: string) => {
-    const remainingFolders = folders.filter((f) => f.id !== id);
-    const removedWordIds = words.filter((w) => w.folderId === id).map((w) => w.id);
-    const removedSet = new Set(removedWordIds);
-    setFolders(remainingFolders);
-    setWords((prev) => prev.filter((w) => w.folderId !== id));
-    setSelectedIds((prev) => prev.filter((wid) => !removedSet.has(wid)));
-    if (activeFolderId === id) {
-      const nextSameLang = remainingFolders.filter(
-        (f) => (f.language || 'en') === prefs.learningLang
-      );
-      setActiveFolderId(nextSameLang[0]?.id || 'all');
-    }
-    if (currentUser) {
-      deleteCloudFolderAndWords(currentUser.uid, id, removedWordIds).catch((err) =>
-        setSyncError(err instanceof Error ? err.message : String(err))
-      );
-    }
-  };
+  const handleDeleteFolder = useCallback(
+    (id: string) => {
+      const currentFolders = latestLocalRef.current.folders;
+      const currentWords = latestLocalRef.current.words;
+      const target = currentFolders.find((f) => f.id === id);
+      const childIds = target?.isParent
+        ? currentFolders.filter((f) => f.parentId === id).map((f) => f.id)
+        : [];
+      const idsToDelete = [id, ...childIds];
+      const deleteFolderSet = new Set(idsToDelete);
+
+      const remainingFolders = currentFolders.filter((f) => !deleteFolderSet.has(f.id));
+      const removedWordIds = currentWords
+        .filter((w) => deleteFolderSet.has(w.folderId))
+        .map((w) => w.id);
+      const removedSet = new Set(removedWordIds);
+      setFolders(remainingFolders);
+      setWords((prev) => prev.filter((w) => !deleteFolderSet.has(w.folderId)));
+      setSelectedIds((prev) => prev.filter((wid) => !removedSet.has(wid)));
+      setActiveFolderId((prevActive) => {
+        if (!deleteFolderSet.has(prevActive)) return prevActive;
+        return getDefaultFolderIdForLang(remainingFolders, prefs.learningLang);
+      });
+      if (currentUser) {
+        deleteCloudFolderAndWords(currentUser.uid, idsToDelete, removedWordIds).catch((err) =>
+          setSyncError(err instanceof Error ? err.message : String(err))
+        );
+      }
+    },
+    [prefs.learningLang, currentUser]
+  );
 
   // Word handlers
-  const handleAddWord = (folderId: string): string => {
-    const id = sanitizeId(
-      `word-${prefs.learningLang}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      'word'
-    );
-    const newWord: VocabWord = {
-      id,
-      folderId,
-      language: prefs.learningLang,
-      english: '',
-      ipa: '',
-      vietnamese: '',
-      example: '',
-      exampleVi: '',
-      synonyms: [],
-      createdAt: Date.now(),
-    };
-    setWords((prev) => [newWord, ...prev]);
-    setSelectedIds((prev) => [id, ...prev]);
-    if (currentUser) {
-      createCloudWord(currentUser.uid, newWord).catch((err) =>
-        setSyncError(err instanceof Error ? err.message : String(err))
+  const handleAddWord = useCallback(
+    (folderId: string): string => {
+      const targetFolder = latestLocalRef.current.folders.find((f) => f.id === folderId);
+      if (targetFolder?.isParent) return '';
+      const id = sanitizeId(
+        `word-${prefs.learningLang}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        'word'
       );
-    }
-    awardXp(10, { totalWordsAdded: progress.totalWordsAdded + 1 });
-    return id;
-  };
-
-  const handleUpdateWord = (wordId: string, updates: Partial<VocabWord>) => {
-    setWords((prev) => prev.map((w) => (w.id === wordId ? { ...w, ...updates } : w)));
-
-    if (currentUser) {
-      const uid = currentUser.uid;
-      pendingWordPatchRef.current[wordId] = {
-        ...(pendingWordPatchRef.current[wordId] || {}),
-        ...updates,
+      const newWord: VocabWord = {
+        id,
+        folderId,
+        language: prefs.learningLang,
+        english: '',
+        ipa: '',
+        vietnamese: '',
+        example: '',
+        exampleVi: '',
+        synonyms: [],
+        createdAt: Date.now(),
       };
+      setWords((prev) => [newWord, ...prev]);
+      setSelectedIds((prev) => [id, ...prev]);
+      if (currentUser) {
+        createCloudWord(currentUser.uid, newWord).catch((err) =>
+          setSyncError(err instanceof Error ? err.message : String(err))
+        );
+      }
+      awardXp(10, { totalWordsAdded: latestLocalRef.current.progress.totalWordsAdded + 1 });
+      return id;
+    },
+    [prefs.learningLang, currentUser, awardXp]
+  );
+
+  const handleUpdateWord = useCallback(
+    (wordId: string, updates: Partial<VocabWord>) => {
+      setWords((prev) => prev.map((w) => (w.id === wordId ? { ...w, ...updates } : w)));
+
+      if (currentUser) {
+        const uid = currentUser.uid;
+        pendingWordPatchRef.current[wordId] = {
+          ...(pendingWordPatchRef.current[wordId] || {}),
+          ...updates,
+        };
+        if (wordDebounceRef.current[wordId]) {
+          clearTimeout(wordDebounceRef.current[wordId]);
+        }
+        wordDebounceRef.current[wordId] = setTimeout(() => {
+          const merged = pendingWordPatchRef.current[wordId];
+          delete pendingWordPatchRef.current[wordId];
+          delete wordDebounceRef.current[wordId];
+          if (merged) {
+            updateCloudWord(uid, wordId, merged).catch((err) =>
+              setSyncError(err instanceof Error ? err.message : String(err))
+            );
+          }
+        }, 450);
+      }
+    },
+    [currentUser]
+  );
+
+  const handleDeleteWord = useCallback(
+    (wordId: string) => {
       if (wordDebounceRef.current[wordId]) {
         clearTimeout(wordDebounceRef.current[wordId]);
-      }
-      wordDebounceRef.current[wordId] = setTimeout(() => {
-        const merged = pendingWordPatchRef.current[wordId];
-        delete pendingWordPatchRef.current[wordId];
         delete wordDebounceRef.current[wordId];
-        if (merged) {
-          updateCloudWord(uid, wordId, merged).catch((err) =>
-            setSyncError(err instanceof Error ? err.message : String(err))
-          );
-        }
-      }, 450);
-    }
-  };
+        delete pendingWordPatchRef.current[wordId];
+      }
+      setWords((prev) => prev.filter((w) => w.id !== wordId));
+      setSelectedIds((prev) => prev.filter((id) => id !== wordId));
+      if (currentUser) {
+        deleteCloudWord(currentUser.uid, wordId).catch((err) =>
+          setSyncError(err instanceof Error ? err.message : String(err))
+        );
+      }
+    },
+    [currentUser]
+  );
 
-  const handleDeleteWord = (wordId: string) => {
-    if (wordDebounceRef.current[wordId]) {
-      clearTimeout(wordDebounceRef.current[wordId]);
-      delete wordDebounceRef.current[wordId];
-      delete pendingWordPatchRef.current[wordId];
-    }
-    setWords((prev) => prev.filter((w) => w.id !== wordId));
-    setSelectedIds((prev) => prev.filter((id) => id !== wordId));
-    if (currentUser) {
-      deleteCloudWord(currentUser.uid, wordId).catch((err) =>
-        setSyncError(err instanceof Error ? err.message : String(err))
-      );
-    }
-  };
-
-  const handleToggleSelect = (wordId: string) => {
+  const handleToggleSelect = useCallback((wordId: string) => {
     setSelectedIds((prev) =>
       prev.includes(wordId) ? prev.filter((id) => id !== wordId) : [...prev, wordId]
     );
-  };
+  }, []);
 
-  const handleSelectAllVisible = (visibleIds: string[]) => {
+  const handleSelectAllVisible = useCallback((visibleIds: string[]) => {
     setSelectedIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
-  };
+  }, []);
 
-  const handleClearSelection = () => {
+  const handleClearSelection = useCallback(() => {
     setSelectedIds([]);
-  };
+  }, []);
 
-  const getPlayableSelectedWords = () => {
+  const getPlayableSelectedWords = useCallback(() => {
     return languageWords.filter(
       (w) => selectedIds.includes(w.id) && (w.english.trim() || w.vietnamese.trim())
     );
-  };
+  }, [languageWords, selectedIds]);
 
-  const handleLaunchFlashcards = () => {
+  const handleLaunchFlashcards = useCallback(() => {
     const chosen = getPlayableSelectedWords();
     if (chosen.length === 0) return;
     setStudyWords(chosen);
     setActiveView('flashcards');
-  };
+  }, [getPlayableSelectedWords]);
 
-  const handleLaunchQuiz = (customWords?: VocabWord[]) => {
-    const chosen =
-      customWords && customWords.length > 0 ? customWords : getPlayableSelectedWords();
-    if (chosen.length === 0) return;
-    setStudyWords(chosen);
-    setActiveView('quiz');
-  };
+  const handleLaunchQuiz = useCallback(
+    (customWords?: VocabWord[]) => {
+      const chosen =
+        Array.isArray(customWords) && customWords.length > 0
+          ? customWords
+          : getPlayableSelectedWords();
+      if (chosen.length === 0) return;
+      setStudyWords(chosen);
+      setActiveView('quiz');
+    },
+    [getPlayableSelectedWords]
+  );
+
+  const handleLaunchSelectedQuiz = useCallback(() => {
+    handleLaunchQuiz();
+  }, [handleLaunchQuiz]);
 
   const handleImportBackup = (payload: VocabBackupPayload) => {
     const prevFolderIds = folders.map((f) => f.id);
     const prevWordIds = words.map((w) => w.id);
-    setFolders(payload.folders);
+    const upgradedFolders = computeHierarchyUpgrade(payload.folders).nextFolders;
+    setFolders(upgradedFolders);
     setWords(payload.words);
     setProgress(payload.progress);
     setReminders(payload.reminders);
-    const matchingLangFolders = payload.folders.filter(
-      (f) => (f.language || 'en') === prefs.learningLang
-    );
-    setActiveFolderId(matchingLangFolders[0]?.id || 'all');
+    setActiveFolderId(getDefaultFolderIdForLang(upgradedFolders, prefs.learningLang));
     setSelectedIds([]);
     if (currentUser) {
       replaceCloudBackup(
@@ -571,7 +740,7 @@ export default function App() {
           learningLang: prefs.learningLang,
           soundMuted: prefs.muted,
         },
-        payload.folders,
+        upgradedFolders,
         payload.words,
         prevFolderIds,
         prevWordIds
@@ -588,8 +757,7 @@ export default function App() {
     setWords(defaultWords);
     setProgress(INITIAL_PROGRESS);
     setReminders(INITIAL_REMINDER_SETTINGS);
-    const firstForLang = defaultFolders.find((f) => f.language === prefs.learningLang);
-    setActiveFolderId(firstForLang?.id || 'all');
+    setActiveFolderId(getDefaultFolderIdForLang(defaultFolders, prefs.learningLang));
     setSelectedIds([]);
     if (currentUser) {
       replaceCloudBackup(
@@ -611,8 +779,11 @@ export default function App() {
     }
   };
 
-  const masteredCount = languageWords.filter((w) => w.mastered).length;
-  const { current: rankTier } = getRankForXp(progress.xp);
+  const masteredCount = useMemo(
+    () => languageWords.filter((w) => w.mastered).length,
+    [languageWords]
+  );
+  const rankTier = useMemo(() => getRankForXp(progress.xp).current, [progress.xp]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -794,108 +965,143 @@ export default function App() {
                 onAddWord={handleAddWord}
                 onUpdateWord={handleUpdateWord}
                 onDeleteWord={handleDeleteWord}
+                onCreateFolder={handleCreateFolder}
+                onUpdateFolder={handleUpdateFolder}
+                onDeleteFolder={handleDeleteFolder}
                 onLaunchFlashcards={handleLaunchFlashcards}
-                onLaunchQuiz={() => handleLaunchQuiz()}
+                onLaunchQuiz={handleLaunchSelectedQuiz}
               />
             </div>
           </div>
         )}
 
         {activeView === 'flashcards' && (
-          <FlashcardMode
-            words={studyWords}
-            studyLanguage={prefs.learningLang}
-            speechAccent={activeSpeechAccent}
-            soundMuted={prefs.muted}
-            onMarkMastered={(wordId, mastered) =>
-              handleUpdateWord(wordId, { mastered, lastReviewedAt: Date.now() })
+          <Suspense
+            fallback={
+              <div className="glass-card rounded-2xl p-10 text-center text-sm font-semibold text-[#5E556E]">
+                Đang tải Flashcards...
+              </div>
             }
-            onCardReviewed={(xp) => awardXp(xp)}
-            onDeckCompleted={(bonusXp) =>
-              awardXp(bonusXp, {
-                totalFlashcardsCompleted: progress.totalFlashcardsCompleted + 1,
-              })
-            }
-            onStartQuizWithWords={(w) => handleLaunchQuiz(w)}
-            onExit={() => setActiveView('notebook')}
-          />
+          >
+            <FlashcardMode
+              words={studyWords}
+              studyLanguage={prefs.learningLang}
+              speechAccent={activeSpeechAccent}
+              soundMuted={prefs.muted}
+              onMarkMastered={(wordId, mastered) =>
+                handleUpdateWord(wordId, { mastered, lastReviewedAt: Date.now() })
+              }
+              onCardReviewed={(xp) => awardXp(xp)}
+              onDeckCompleted={(bonusXp) =>
+                awardXp(bonusXp, {
+                  totalFlashcardsCompleted: progress.totalFlashcardsCompleted + 1,
+                })
+              }
+              onStartQuizWithWords={(w) => handleLaunchQuiz(w)}
+              onExit={() => setActiveView('notebook')}
+            />
+          </Suspense>
         )}
 
         {activeView === 'quiz' && (
-          <SmartQuizMode
-            selectedWords={studyWords}
-            allWordsPool={languageWords}
-            studyLanguage={prefs.learningLang}
-            speechAccent={activeSpeechAccent}
-            soundMuted={prefs.muted}
-            onQuestionAnswered={(isCorrect, xpEarned) => {
-              if (isCorrect) {
-                awardXp(xpEarned, {
-                  totalCorrectAnswers: progress.totalCorrectAnswers + 1,
-                });
-              }
-            }}
-            onQuizCompleted={(bonusXp) =>
-              awardXp(bonusXp, {
-                totalQuizzesCompleted: progress.totalQuizzesCompleted + 1,
-              })
+          <Suspense
+            fallback={
+              <div className="glass-card rounded-2xl p-10 text-center text-sm font-semibold text-[#5E556E]">
+                Đang chuẩn bị Smart Quiz...
+              </div>
             }
-            onExit={() => setActiveView('notebook')}
-          />
+          >
+            <SmartQuizMode
+              selectedWords={studyWords}
+              allWordsPool={languageWords}
+              studyLanguage={prefs.learningLang}
+              speechAccent={activeSpeechAccent}
+              soundMuted={prefs.muted}
+              onQuestionAnswered={(isCorrect, xpEarned) => {
+                if (isCorrect) {
+                  awardXp(xpEarned, {
+                    totalCorrectAnswers: progress.totalCorrectAnswers + 1,
+                  });
+                }
+              }}
+              onQuizCompleted={(bonusXp) =>
+                awardXp(bonusXp, {
+                  totalQuizzesCompleted: progress.totalQuizzesCompleted + 1,
+                })
+              }
+              onExit={() => setActiveView('notebook')}
+            />
+          </Suspense>
         )}
       </main>
 
-      <AuthModal
-        isOpen={isAuthOpen}
-        user={currentUser}
-        isSyncing={isSyncing}
-        syncError={syncError}
-        wordCount={words.length}
-        folderCount={folders.length}
-        onSignInWithGoogle={handleSignInWithGoogle}
-        onSignOut={handleSignOut}
-        onClose={() => setIsAuthOpen(false)}
-      />
+      {isAuthOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={isAuthOpen}
+            user={currentUser}
+            isSyncing={isSyncing}
+            syncError={syncError}
+            wordCount={words.length}
+            folderCount={folders.length}
+            onSignInWithGoogle={handleSignInWithGoogle}
+            onSignOut={handleSignOut}
+            onClose={() => setIsAuthOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      <LeaderboardModal
-        isOpen={isLeaderboardOpen}
-        progress={progress}
-        onUpdateStudentName={(name) => {
-          const updated = { ...progress, studentName: name };
-          setProgress(updated);
-          if (currentUser) {
-            updateCloudUserProgress(currentUser.uid, updated).catch(() => {});
-          }
-        }}
-        onClose={() => setIsLeaderboardOpen(false)}
-      />
+      {isLeaderboardOpen && (
+        <Suspense fallback={null}>
+          <LeaderboardModal
+            isOpen={isLeaderboardOpen}
+            progress={progress}
+            onUpdateStudentName={(name) => {
+              const updated = { ...progress, studentName: name };
+              setProgress(updated);
+              if (currentUser) {
+                updateCloudUserProgress(currentUser.uid, updated).catch(() => {});
+              }
+            }}
+            onClose={() => setIsLeaderboardOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      <EmailReminderModal
-        isOpen={isRemindersOpen}
-        settings={reminders}
-        folders={folders}
-        words={words}
-        progress={progress}
-        onUpdateSettings={(updates) => {
-          const next = { ...reminders, ...updates };
-          setReminders(next);
-          if (currentUser) {
-            updateCloudReminders(currentUser.uid, next).catch(() => {});
-          }
-        }}
-        onClose={() => setIsRemindersOpen(false)}
-      />
+      {isRemindersOpen && (
+        <Suspense fallback={null}>
+          <EmailReminderModal
+            isOpen={isRemindersOpen}
+            settings={reminders}
+            folders={folders}
+            words={words}
+            progress={progress}
+            onUpdateSettings={(updates) => {
+              const next = { ...reminders, ...updates };
+              setReminders(next);
+              if (currentUser) {
+                updateCloudReminders(currentUser.uid, next).catch(() => {});
+              }
+            }}
+            onClose={() => setIsRemindersOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      <BackupModal
-        isOpen={isBackupOpen}
-        folders={folders}
-        words={words}
-        progress={progress}
-        reminders={reminders}
-        onImportBackup={handleImportBackup}
-        onResetSampleData={handleResetSampleData}
-        onClose={() => setIsBackupOpen(false)}
-      />
+      {isBackupOpen && (
+        <Suspense fallback={null}>
+          <BackupModal
+            isOpen={isBackupOpen}
+            folders={folders}
+            words={words}
+            progress={progress}
+            reminders={reminders}
+            onImportBackup={handleImportBackup}
+            onResetSampleData={handleResetSampleData}
+            onClose={() => setIsBackupOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

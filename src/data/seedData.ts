@@ -16,6 +16,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: string;
     border: string;
     swatch: string;
+    icon: string;
     text: string;
   }
 > = {
@@ -25,6 +26,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: 'bg-[#E6E6FA]',
     border: 'border-[#D5CEF5]',
     swatch: 'bg-[#B9AEE8]',
+    icon: 'text-[#7C5CBF] fill-[#D8CEF8]',
     text: 'text-[#3F3163]',
   },
   blush: {
@@ -33,6 +35,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: 'bg-[#FFE4E1]',
     border: 'border-[#F7CBC6]',
     swatch: 'bg-[#F29C94]',
+    icon: 'text-[#D66862] fill-[#FFD3CE]',
     text: 'text-[#632F2D]',
   },
   mint: {
@@ -41,6 +44,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: 'bg-[#E0F2F1]',
     border: 'border-[#BFE3E0]',
     swatch: 'bg-[#6FC2BA]',
+    icon: 'text-[#2D948A] fill-[#BCE8E3]',
     text: 'text-[#1F4F4B]',
   },
   cream: {
@@ -49,6 +53,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: 'bg-[#FFF6DA]',
     border: 'border-[#EFE2B8]',
     swatch: 'bg-[#E6C56E]',
+    icon: 'text-[#B88B28] fill-[#FBE7AD]',
     text: 'text-[#59471A]',
   },
   sky: {
@@ -57,6 +62,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: 'bg-[#DFF0FA]',
     border: 'border-[#BFDFF2]',
     swatch: 'bg-[#7BBCE8]',
+    icon: 'text-[#3B8CC4] fill-[#C4E4FA]',
     text: 'text-[#1F4B66]',
   },
   peach: {
@@ -65,6 +71,7 @@ export const FOLDER_COLOR_STYLES: Record<
     activeBg: 'bg-[#FFE7D6]',
     border: 'border-[#F7CFB3]',
     swatch: 'bg-[#F2A679]',
+    icon: 'text-[#D47542] fill-[#FAD5BC]',
     text: 'text-[#61371E]',
   },
 };
@@ -253,20 +260,23 @@ export function getRankForXp(xp: number): {
 
 export const INITIAL_FOLDERS: TopicFolder[] = [
   {
+    id: 'parent-en-academic',
+    name: 'IELTS & Academic',
+    description: 'Nhóm chủ đề học thuật & công việc chuyên ngành.',
+    color: 'mint',
+    language: 'en',
+    isParent: true,
+    createdAt: 1729999800000,
+  },
+  {
     id: 'folder-ielts-env',
     name: 'IELTS Environment',
     description: 'Academic vocabulary for climate, energy & conservation topics.',
     color: 'mint',
     language: 'en',
+    isParent: false,
+    parentId: 'parent-en-academic',
     createdAt: 1730000000000,
-  },
-  {
-    id: 'folder-daily-conv',
-    name: 'Daily Conversation',
-    description: 'Natural expressions for warm everyday chats and social life.',
-    color: 'blush',
-    language: 'en',
-    createdAt: 1730000100000,
   },
   {
     id: 'folder-business',
@@ -274,7 +284,28 @@ export const INITIAL_FOLDERS: TopicFolder[] = [
     description: 'Essential workplace verbs and project communication terms.',
     color: 'lavender',
     language: 'en',
+    isParent: false,
+    parentId: 'parent-en-academic',
     createdAt: 1730000200000,
+  },
+  {
+    id: 'parent-en-life',
+    name: 'Daily Life & Family',
+    description: 'Nhóm chủ đề giao tiếp hằng ngày và gia đình.',
+    color: 'blush',
+    language: 'en',
+    isParent: true,
+    createdAt: 1729999900000,
+  },
+  {
+    id: 'folder-daily-conv',
+    name: 'Daily Conversation',
+    description: 'Natural expressions for warm everyday chats and social life.',
+    color: 'blush',
+    language: 'en',
+    isParent: false,
+    parentId: 'parent-en-life',
+    createdAt: 1730000100000,
   },
   {
     id: 'folder-unit1-family',
@@ -282,26 +313,31 @@ export const INITIAL_FOLDERS: TopicFolder[] = [
     description: 'Heartwarming words about family bonds, home, and generations.',
     color: 'peach',
     language: 'en',
+    isParent: false,
+    parentId: 'parent-en-life',
     createdAt: 1730000300000,
   },
 ];
 
 export const CHINESE_INITIAL_FOLDERS: TopicFolder[] = [
   {
+    id: 'parent-zh-hsk',
+    name: 'HSK & Công việc',
+    description: 'Nhóm từ vựng HSK giao tiếp nền tảng và môi trường học tập.',
+    color: 'blush',
+    language: 'zh',
+    isParent: true,
+    createdAt: 1730000350000,
+  },
+  {
     id: 'folder-zh-hsk1',
     name: 'HSK 1–2: Giao tiếp cơ bản',
     description: 'Các mẫu câu chào hỏi, cảm ơn, xin lỗi thông dụng hằng ngày.',
     color: 'blush',
     language: 'zh',
+    isParent: false,
+    parentId: 'parent-zh-hsk',
     createdAt: 1730000400000,
-  },
-  {
-    id: 'folder-zh-family',
-    name: 'Gia đình & Đời sống',
-    description: 'Từ vựng tiếng Trung về tình cảm gia đình, chăm sóc và tổ ấm.',
-    color: 'peach',
-    language: 'zh',
-    createdAt: 1730000500000,
   },
   {
     id: 'folder-zh-work',
@@ -309,7 +345,28 @@ export const CHINESE_INITIAL_FOLDERS: TopicFolder[] = [
     description: 'Từ vựng HSK 3–4 về nỗ lực học tập, hợp tác và cơ hội nghề nghiệp.',
     color: 'lavender',
     language: 'zh',
+    isParent: false,
+    parentId: 'parent-zh-hsk',
     createdAt: 1730000600000,
+  },
+  {
+    id: 'parent-zh-life',
+    name: 'Đời sống & Du lịch',
+    description: 'Nhóm từ vựng tiếng Trung về gia đình, ẩm thực và du lịch.',
+    color: 'peach',
+    language: 'zh',
+    isParent: true,
+    createdAt: 1730000380000,
+  },
+  {
+    id: 'folder-zh-family',
+    name: 'Gia đình & Đời sống',
+    description: 'Từ vựng tiếng Trung về tình cảm gia đình, chăm sóc và tổ ấm.',
+    color: 'peach',
+    language: 'zh',
+    isParent: false,
+    parentId: 'parent-zh-life',
+    createdAt: 1730000500000,
   },
   {
     id: 'folder-zh-travel',
@@ -317,6 +374,8 @@ export const CHINESE_INITIAL_FOLDERS: TopicFolder[] = [
     description: 'Từ vựng gọi món ăn, ngắm cảnh và chuẩn bị chuyến đi.',
     color: 'mint',
     language: 'zh',
+    isParent: false,
+    parentId: 'parent-zh-life',
     createdAt: 1730000700000,
   },
 ];

@@ -264,23 +264,30 @@ export const EmailReminderModal: React.FC<EmailReminderModalProps> = ({
                 Topic Folders to Review
               </span>
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                {folders.map((folder) => {
-                  const checked = settings.selectedFolderIds.includes(folder.id);
-                  return (
-                    <label
-                      key={folder.id}
-                      className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white border border-[#867C96]/15 hover:border-[#B9AEE8] text-xs font-semibold text-[#2B2438] cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleFolder(folder.id)}
-                        className="w-4 h-4 accent-[#6F5C96]"
-                      />
-                      <span className="truncate">{folder.name}</span>
-                    </label>
-                  );
-                })}
+                {folders
+                  .filter((f) => !f.isParent)
+                  .map((folder) => {
+                    const checked = settings.selectedFolderIds.includes(folder.id);
+                    const parentName = folder.parentId
+                      ? folders.find((p) => p.id === folder.parentId)?.name
+                      : undefined;
+                    return (
+                      <label
+                        key={folder.id}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-white border border-[#867C96]/15 hover:border-[#B9AEE8] text-xs font-semibold text-[#2B2438] cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleFolder(folder.id)}
+                          className="w-4 h-4 accent-[#6F5C96]"
+                        />
+                        <span className="truncate">
+                          {parentName ? `${parentName} › ${folder.name}` : folder.name}
+                        </span>
+                      </label>
+                    );
+                  })}
               </div>
             </div>
 
